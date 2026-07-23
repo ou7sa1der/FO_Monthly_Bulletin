@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FO Monthly Bulletin</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <h1>FO Monthly Bulletin — Admin</h1>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="submit">Submit your update</button>
+    <button class="tab-btn" data-tab="bulletin">Bulletin</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============ SUBMIT TAB ============ -->
+  <section id="tab-submit" class="tab-panel active">
+    <div class="submit-inner">
+
+    <div class="team-form" data-team="foTeam">
+      <h2>FO Team</h2>
+      <label>Subtitle
+        <input type="text" class="team-subtitle" value="Working together. Delivering impact." />
+      </label>
+
+      <h3>🏆 Wins</h3>
+      <div class="dynamic-list" data-list="wins"></div>
+      <button type="button" class="add-btn" data-action="add-win">+ Add a win</button>
+
+      <h3>🚀 Upcoming</h3>
+      <div class="dynamic-list" data-list="upcoming"></div>
+      <button type="button" class="add-btn" data-action="add-upcoming">+ Add an upcoming item</button>
+
+      <div class="save-row">
+        <button type="button" class="save-btn" data-action="save-team">Save FO Team</button>
+        <span class="save-status"></span>
+      </div>
+    </div>
+
+    <div class="team-form" data-team="foSpecialists">
+      <h2>FO Specialists Team</h2>
+      <label>Subtitle
+        <input type="text" class="team-subtitle" value="Driving quality. Creating value." />
+      </label>
+
+      <h3>🏆 Big Wins</h3>
+      <div class="dynamic-list" data-list="wins"></div>
+      <button type="button" class="add-btn" data-action="add-win">+ Add a win</button>
+
+      <h3>🚀 Upcoming</h3>
+      <div class="dynamic-list" data-list="upcoming"></div>
+      <button type="button" class="add-btn" data-action="add-upcoming">+ Add an upcoming item</button>
+
+      <div class="save-row">
+        <button type="button" class="save-btn" data-action="save-team">Save FO Specialists Team</button>
+        <span class="save-status"></span>
+      </div>
+    </div>
+
+    <div class="shoutouts-form">
+      <h2>💛 Acknowledgements</h2>
+      <p class="hint">Shoutouts are shared across both teams — adding one saves it immediately.</p>
+      <div class="dynamic-list" data-list="shoutouts-input"></div>
+      <button type="button" class="add-btn" id="add-shoutout-row">+ Add a shoutout row</button>
+      <div class="save-row">
+        <button type="button" class="save-btn" id="save-shoutouts">Save new shoutouts</button>
+        <span class="save-status" id="shoutout-status"></span>
+      </div>
+      <h3>Currently published shoutouts</h3>
+      <div id="existing-shoutouts" class="existing-list"></div>
+    </div>
+
+    </div>
+  </section>
+
+  <!-- ============ BULLETIN TAB ============ -->
+  <section id="tab-bulletin" class="tab-panel">
+
+    <!-- This exact container is what gets rendered to PNG — buttons live outside it, below, so they never appear in the export -->
+    <div id="bulletin-template" class="bulletin-mockup">
+      <div class="mockup-header">
+        <div class="mockup-header-icon-wrap">
+          <div class="confetti c1">🔸</div>
+          <div class="confetti c2">🔹</div>
+          <div class="confetti c3">▪️</div>
+          <div class="mockup-header-icon">📣</div>
+        </div>
+        <div class="mockup-header-text">
+          <h1>FO Monthly Bulletin</h1>
+          <p>Your monthly snapshot of our wins, what's coming up, and the people who make it happen. 💜</p>
+        </div>
+        <svg class="mockup-squiggle" viewBox="0 0 160 90" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8,70 C40,85 40,25 80,35 C105,42 110,15 145,18" fill="none" stroke="#b7a9f0" stroke-width="2" stroke-dasharray="6 6" stroke-linecap="round"/>
+          <text x="130" y="22" font-size="26">🛩️</text>
+          <text x="10" y="20" font-size="14">✨</text>
+          <text x="60" y="80" font-size="14">✨</text>
+        </svg>
+        <div class="mockup-date-badge">
+          <div id="mockup-date"></div>
+        </div>
+      </div>
+
+      <div class="mockup-teams">
+        <div class="mockup-team-card team-blue" id="card-foTeam"></div>
+        <div class="mockup-team-card team-green" id="card-foSpecialists"></div>
+      </div>
+
+      <div class="mockup-acknowledgements">
+        <div class="ack-header">
+          <div class="ack-icon">💛</div>
+          <div class="ack-header-text">
+            <h2>Acknowledgements</h2>
+            <p>Shoutouts to the people and teams making a difference.</p>
+          </div>
+        </div>
+        <div class="ack-cards" id="ack-cards"></div>
+      </div>
+
+      <div class="mockup-footer">
+        <div class="footer-icon">📣</div>
+        <div class="footer-text">
+          <h3>Have something to share?</h3>
+          <p>Send your updates, wins, or insights for next month's bulletin!</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bulletin-controls">
+      <label class="period-label">Bulletin period
+        <input type="text" id="period-override" placeholder="Auto: current month" maxlength="20" />
+      </label>
+      <button type="button" id="refresh-btn">Refresh preview</button>
+      <button type="button" id="generate-btn">Generate PDF</button>
+      <button type="button" id="clear-btn" class="danger">Clear Fields</button>
+      <span id="bulletin-status"></span>
+    </div>
+  </section>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
