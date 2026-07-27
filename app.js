@@ -458,7 +458,7 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
       compress: true
     });
     pdf.addImage(canvas, "PNG", 0, 0, canvas.width, canvas.height);
-    pdf.save(`fo-monthly-bulletin-${new Date().toISOString().slice(0, 10)}.pdf`);
+    pdf.save(`fo-monthly-bulletin-${new Date().toISOString().slice(0, 7)}.pdf`);
     statusEl.textContent = "Downloaded ✅";
   } catch (err) {
     console.error(err);
