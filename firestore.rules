@@ -16,6 +16,36 @@ service cloud.firestore {
         && request.resource.data.upcoming.size() <= 20;
     }
 
+    match /bulletin/current/kpis/{kpiDocId} {
+      allow read: if true;
+
+      allow write: if request.auth != null
+        && kpiDocId == 'values'
+        && request.resource.data.keys().hasOnly(['correctFixtures', 'tier1Sla', 'tier2Sla', 'tier35Sla'])
+        && request.resource.data.correctFixtures is number
+        && request.resource.data.correctFixtures >= 0 && request.resource.data.correctFixtures <= 100
+        && request.resource.data.tier1Sla is number
+        && request.resource.data.tier1Sla >= 0 && request.resource.data.tier1Sla <= 100
+        && request.resource.data.tier2Sla is number
+        && request.resource.data.tier2Sla >= 0 && request.resource.data.tier2Sla <= 100
+        && request.resource.data.tier35Sla is number
+        && request.resource.data.tier35Sla >= 0 && request.resource.data.tier35Sla <= 100;
+
+      allow write: if request.auth != null
+        && kpiDocId == 'faValues'
+        && request.resource.data.keys().hasOnly(['workingTimeUtilisation', 'responseTimeNewRequests', 'resolutionTimeOldRequests', 'qualityOfStatements'])
+        && request.resource.data.workingTimeUtilisation is number
+        && request.resource.data.workingTimeUtilisation >= 0 && request.resource.data.workingTimeUtilisation <= 100
+        && request.resource.data.responseTimeNewRequests is number
+        && request.resource.data.responseTimeNewRequests >= 0 && request.resource.data.responseTimeNewRequests <= 100
+        && request.resource.data.resolutionTimeOldRequests is number
+        && request.resource.data.resolutionTimeOldRequests >= 0 && request.resource.data.resolutionTimeOldRequests <= 100
+        && request.resource.data.qualityOfStatements is number
+        && request.resource.data.qualityOfStatements >= 0 && request.resource.data.qualityOfStatements <= 100;
+
+      allow delete: if request.auth != null;
+    }
+
     match /bulletin/current/shoutouts/{shoutoutId} {
       allow read: if true;
 

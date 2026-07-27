@@ -32,10 +32,10 @@ const KPI_GROUPS = [
     docId: "faValues",
     threshold: 95,
     defs: [
-      { key: "feedUptime", label: "Feed Uptime" },
-      { key: "feedDataAccuracy", label: "Feed Data Accuracy" },
-      { key: "incidentResponseSla", label: "Incident Response Time (SLA)" },
-      { key: "statementQuality", label: "Statement Quality" }
+      { key: "workingTimeUtilisation", label: "Working Time Utilisation" },
+      { key: "responseTimeNewRequests", label: "Response Time to New Requests" },
+      { key: "resolutionTimeOldRequests", label: "Resolution Time of Old Requests" },
+      { key: "qualityOfStatements", label: "Quality of Statements Provided" }
     ]
   }
 ];
