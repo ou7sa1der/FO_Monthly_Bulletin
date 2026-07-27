@@ -15,6 +15,14 @@ const TEAM_DEFAULTS = {
   foSpecialists: { name: "FO Specialists Team", label: "Big Wins" }
 };
 
+const KPI_THRESHOLD = 99.8;
+const KPI_DEFS = [
+  { key: "correctFixtures", label: "Correct Fixture Data (48h)" },
+  { key: "tier1Sla", label: "Tier 1 SLA Creation" },
+  { key: "tier2Sla", label: "Tier 2 SLA Creation" },
+  { key: "tier35Sla", label: "Tier 3-5 SLA Creation" }
+];
+
 let authReady = signInAnonymously(auth).catch((err) => {
   console.error("Anonymous sign-in failed:", err);
   alert("Could not connect — check your internet connection and try reloading.");
@@ -153,6 +161,41 @@ async function loadTeamForm(teamId) {
   }
 }
 
+// ---------- KPIs ----------
+async function loadKpiForm() {
+  await authReady;
+  try {
+    const snap = await getDoc(doc(db, "bulletin", "current", "kpis", "values"));
+    const data = snap.exists() ? snap.data() : {};
+    document.querySelectorAll(".kpi-input").forEach((input) => {
+      const value = data[input.dataset.kpi];
+      input.value = typeof value === "number" ? value : "";
+    });
+  } catch (err) {
+    console.error("Failed to load KPI values:", err);
+    document.getElementById("kpi-status").textContent = "Couldn't load existing KPI values — check your connection and reload.";
+  }
+}
+loadKpiForm();
+
+document.getElementById("save-kpis").addEventListener("click", async () => {
+  await authReady;
+  const statusEl = document.getElementById("kpi-status");
+  const payload = {};
+  for (const input of document.querySelectorAll(".kpi-input")) {
+    const num = parseFloat(input.value);
+    payload[input.dataset.kpi] = Number.isFinite(num) ? Math.min(100, Math.max(0, num)) : 0;
+  }
+  try {
+    await setDoc(doc(db, "bulletin", "current", "kpis", "values"), payload);
+    statusEl.textContent = "Saved — KPIs are in ✅";
+    setTimeout(() => (statusEl.textContent = ""), 4000);
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Save failed — check your connection and try again.";
+  }
+});
+
 document.querySelectorAll(".team-form").forEach((form) => {
   loadTeamForm(form.dataset.team);
 
@@ -249,6 +292,30 @@ async function loadBulletinPreview() {
     `${escapeHtml(period)}<br><small>Published: ${now.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</small>`;
 
   let hadError = false;
+
+  const kpiContainer = document.getElementById("mockup-kpis");
+  try {
+    const kpiSnap = await getDoc(doc(db, "bulletin", "current", "kpis", "values"));
+    const kpiData = kpiSnap.exists() ? kpiSnap.data() : {};
+    kpiContainer.innerHTML = KPI_DEFS.map(({ key, label }) => {
+      const value = typeof kpiData[key] === "number" ? kpiData[key] : null;
+      const isGood = value !== null && value >= KPI_THRESHOLD;
+      const statusClass = value === null ? "" : isGood ? "status-good" : "status-critical";
+      const statusText = value === null ? "No data yet" : isGood ? "✅ On target" : "⚠️ Below target";
+      return `
+        <div class="kpi-tile ${statusClass}">
+          <p class="kpi-label">${escapeHtml(label)}</p>
+          <div class="kpi-value-row">
+            <span class="kpi-value">${value === null ? "—" : value.toFixed(1) + "%"}</span>
+            <span class="kpi-status-text">${statusText}</span>
+          </div>
+        </div>`;
+    }).join("");
+  } catch (err) {
+    console.error("Failed to load KPIs:", err);
+    kpiContainer.innerHTML = `<div class="kpi-tile"><p class="kpi-label">Couldn't load KPIs — check your connection and hit Refresh.</p></div>`;
+    hadError = true;
+  }
 
   for (const teamId of Object.keys(TEAM_DEFAULTS)) {
     const card = document.getElementById(`card-${teamId}`);
@@ -375,7 +442,7 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
 });
 
 document.getElementById("clear-btn").addEventListener("click", async () => {
-  if (!confirm("Clear all fields for next month? This removes this cycle's wins, upcoming items, and shoutouts. Make sure you've already downloaded/published this month's picture.")) {
+  if (!confirm("Clear all fields for next month? This removes this cycle's wins, upcoming items, shoutouts, and KPI values. Make sure you've already downloaded/published this month's picture.")) {
     return;
   }
   await authReady;
@@ -394,12 +461,14 @@ document.getElementById("clear-btn").addEventListener("click", async () => {
   for (const docSnap of shoutSnap.docs) {
     await deleteDoc(doc(db, "bulletin", "current", "shoutouts", docSnap.id));
   }
+  await deleteDoc(doc(db, "bulletin", "current", "kpis", "values")).catch(() => {});
 
   statusEl.textContent = "Cleared — ready for next month ✅";
   setTimeout(() => (statusEl.textContent = ""), 4000);
   loadBulletinPreview();
   document.querySelectorAll(".team-form").forEach((form) => loadTeamForm(form.dataset.team));
   loadShoutouts();
+  loadKpiForm();
 });
 
 // ---------- View modes (?mode=submit / ?mode=view / none = full admin) ----------

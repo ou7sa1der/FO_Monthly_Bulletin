@@ -9,7 +9,7 @@
 <body>
 
 <header class="app-header">
-  <h1>FO Monthly Bulletin - Admin</h1>
+  <h1>FO Monthly Bulletin — Admin</h1>
   <nav class="tabs">
     <button class="tab-btn active" data-tab="submit">Submit your update</button>
     <button class="tab-btn" data-tab="bulletin">Bulletin</button>
@@ -21,6 +21,29 @@
   <!-- ============ SUBMIT TAB ============ -->
   <section id="tab-submit" class="tab-panel active">
     <div class="submit-inner">
+
+    <div class="kpi-form">
+      <h2>📊 Monthly KPIs</h2>
+      <p class="hint">Shared across both teams — green at 99.8% or above, red below.</p>
+      <div class="kpi-input-grid">
+        <label>Correct Fixture Data (48h)
+          <input type="number" class="kpi-input" data-kpi="correctFixtures" min="0" max="100" step="0.1" placeholder="e.g. 98.9" />
+        </label>
+        <label>Tier 1 SLA Creation
+          <input type="number" class="kpi-input" data-kpi="tier1Sla" min="0" max="100" step="0.1" placeholder="e.g. 99.9" />
+        </label>
+        <label>Tier 2 SLA Creation
+          <input type="number" class="kpi-input" data-kpi="tier2Sla" min="0" max="100" step="0.1" placeholder="e.g. 99.9" />
+        </label>
+        <label>Tier 3-5 SLA Creation
+          <input type="number" class="kpi-input" data-kpi="tier35Sla" min="0" max="100" step="0.1" placeholder="e.g. 99.9" />
+        </label>
+      </div>
+      <div class="save-row">
+        <button type="button" class="save-btn" id="save-kpis">Save KPIs</button>
+        <span class="save-status" id="kpi-status"></span>
+      </div>
+    </div>
 
     <div class="team-form" data-team="foTeam">
       <h2>FO Team</h2>
@@ -104,6 +127,8 @@
           <div id="mockup-date"></div>
         </div>
       </div>
+
+      <div class="mockup-kpis" id="mockup-kpis"></div>
 
       <div class="mockup-teams">
         <div class="mockup-team-card team-blue" id="card-foTeam"></div>
