@@ -11,17 +11,35 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const TEAM_DEFAULTS = {
-  foTeam: { name: "FO Team", label: "Wins" },
-  foSpecialists: { name: "FO Specialists Team", label: "Big Wins" }
+  foTeam: { name: "FO Delivery", label: "Wins" },
+  foSpecialists: { name: "FO Automation", label: "Big Wins" }
 };
 
-const KPI_THRESHOLD = 99.8;
-const KPI_DEFS = [
-  { key: "correctFixtures", label: "Correct Fixture Data (48h)" },
-  { key: "tier1Sla", label: "Tier 1 SLA Creation" },
-  { key: "tier2Sla", label: "Tier 2 SLA Creation" },
-  { key: "tier35Sla", label: "Tier 3-5 SLA Creation" }
+const KPI_GROUPS = [
+  {
+    id: "fo",
+    docId: "values",
+    threshold: 99.8,
+    defs: [
+      { key: "correctFixtures", label: "Correct Fixture Data (48h)" },
+      { key: "tier1Sla", label: "Tier 1 SLA Creation" },
+      { key: "tier2Sla", label: "Tier 2 SLA Creation" },
+      { key: "tier35Sla", label: "Tier 3-5 SLA Creation" }
+    ]
+  },
+  {
+    id: "fa",
+    docId: "faValues",
+    threshold: 95,
+    defs: [
+      { key: "feedUptime", label: "Feed Uptime" },
+      { key: "feedDataAccuracy", label: "Feed Data Accuracy" },
+      { key: "incidentResponseSla", label: "Incident Response Time (SLA)" },
+      { key: "statementQuality", label: "Statement Quality" }
+    ]
+  }
 ];
+function kpiGroup(id) { return KPI_GROUPS.find((g) => g.id === id); }
 
 let authReady = signInAnonymously(auth).catch((err) => {
   console.error("Anonymous sign-in failed:", err);
@@ -162,38 +180,44 @@ async function loadTeamForm(teamId) {
 }
 
 // ---------- KPIs ----------
-async function loadKpiForm() {
+async function loadKpiForm(form) {
   await authReady;
+  const group = kpiGroup(form.dataset.kpiGroup);
+  const statusEl = form.querySelector(".save-status");
   try {
-    const snap = await getDoc(doc(db, "bulletin", "current", "kpis", "values"));
+    const snap = await getDoc(doc(db, "bulletin", "current", "kpis", group.docId));
     const data = snap.exists() ? snap.data() : {};
-    document.querySelectorAll(".kpi-input").forEach((input) => {
+    form.querySelectorAll(".kpi-input").forEach((input) => {
       const value = data[input.dataset.kpi];
       input.value = typeof value === "number" ? value : "";
     });
   } catch (err) {
-    console.error("Failed to load KPI values:", err);
-    document.getElementById("kpi-status").textContent = "Couldn't load existing KPI values — check your connection and reload.";
+    console.error(`Failed to load KPI values for group ${group.id}:`, err);
+    statusEl.textContent = "Couldn't load existing KPI values — check your connection and reload.";
   }
 }
-loadKpiForm();
 
-document.getElementById("save-kpis").addEventListener("click", async () => {
-  await authReady;
-  const statusEl = document.getElementById("kpi-status");
-  const payload = {};
-  for (const input of document.querySelectorAll(".kpi-input")) {
-    const num = parseFloat(input.value);
-    payload[input.dataset.kpi] = Number.isFinite(num) ? Math.min(100, Math.max(0, num)) : 0;
-  }
-  try {
-    await setDoc(doc(db, "bulletin", "current", "kpis", "values"), payload);
-    statusEl.textContent = "Saved — KPIs are in ✅";
-    setTimeout(() => (statusEl.textContent = ""), 4000);
-  } catch (err) {
-    console.error(err);
-    statusEl.textContent = "Save failed — check your connection and try again.";
-  }
+document.querySelectorAll(".kpi-form").forEach((form) => {
+  loadKpiForm(form);
+
+  form.querySelector('[data-action="save-kpi-group"]').addEventListener("click", async () => {
+    await authReady;
+    const group = kpiGroup(form.dataset.kpiGroup);
+    const statusEl = form.querySelector(".save-status");
+    const payload = {};
+    for (const input of form.querySelectorAll(".kpi-input")) {
+      const num = parseFloat(input.value);
+      payload[input.dataset.kpi] = Number.isFinite(num) ? Math.min(100, Math.max(0, num)) : 0;
+    }
+    try {
+      await setDoc(doc(db, "bulletin", "current", "kpis", group.docId), payload);
+      statusEl.textContent = "Saved — KPIs are in ✅";
+      setTimeout(() => (statusEl.textContent = ""), 4000);
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = "Save failed — check your connection and try again.";
+    }
+  });
 });
 
 document.querySelectorAll(".team-form").forEach((form) => {
@@ -293,28 +317,30 @@ async function loadBulletinPreview() {
 
   let hadError = false;
 
-  const kpiContainer = document.getElementById("mockup-kpis");
-  try {
-    const kpiSnap = await getDoc(doc(db, "bulletin", "current", "kpis", "values"));
-    const kpiData = kpiSnap.exists() ? kpiSnap.data() : {};
-    kpiContainer.innerHTML = KPI_DEFS.map(({ key, label }) => {
-      const value = typeof kpiData[key] === "number" ? kpiData[key] : null;
-      const isGood = value !== null && value >= KPI_THRESHOLD;
-      const statusClass = value === null ? "" : isGood ? "status-good" : "status-critical";
-      const statusText = value === null ? "No data yet" : isGood ? "✅ On target" : "⚠️ Below target";
-      return `
-        <div class="kpi-tile ${statusClass}">
-          <p class="kpi-label">${escapeHtml(label)}</p>
-          <div class="kpi-value-row">
-            <span class="kpi-value">${value === null ? "—" : value.toFixed(1) + "%"}</span>
-            <span class="kpi-status-text">${statusText}</span>
-          </div>
-        </div>`;
-    }).join("");
-  } catch (err) {
-    console.error("Failed to load KPIs:", err);
-    kpiContainer.innerHTML = `<div class="kpi-tile"><p class="kpi-label">Couldn't load KPIs — check your connection and hit Refresh.</p></div>`;
-    hadError = true;
+  for (const group of KPI_GROUPS) {
+    const kpiContainer = document.getElementById(`mockup-kpis-${group.id}`);
+    try {
+      const kpiSnap = await getDoc(doc(db, "bulletin", "current", "kpis", group.docId));
+      const kpiData = kpiSnap.exists() ? kpiSnap.data() : {};
+      kpiContainer.innerHTML = group.defs.map(({ key, label }) => {
+        const value = typeof kpiData[key] === "number" ? kpiData[key] : null;
+        const isGood = value !== null && value >= group.threshold;
+        const statusClass = value === null ? "" : isGood ? "status-good" : "status-critical";
+        const statusText = value === null ? "No data yet" : isGood ? "✅ On target" : "⚠️ Below target";
+        return `
+          <div class="kpi-tile ${statusClass}">
+            <p class="kpi-label">${escapeHtml(label)}</p>
+            <div class="kpi-value-row">
+              <span class="kpi-value">${value === null ? "—" : value.toFixed(1) + "%"}</span>
+              <span class="kpi-status-text">${statusText}</span>
+            </div>
+          </div>`;
+      }).join("");
+    } catch (err) {
+      console.error(`Failed to load KPIs for group ${group.id}:`, err);
+      kpiContainer.innerHTML = `<div class="kpi-tile"><p class="kpi-label">Couldn't load KPIs — check your connection and hit Refresh.</p></div>`;
+      hadError = true;
+    }
   }
 
   for (const teamId of Object.keys(TEAM_DEFAULTS)) {
@@ -461,14 +487,16 @@ document.getElementById("clear-btn").addEventListener("click", async () => {
   for (const docSnap of shoutSnap.docs) {
     await deleteDoc(doc(db, "bulletin", "current", "shoutouts", docSnap.id));
   }
-  await deleteDoc(doc(db, "bulletin", "current", "kpis", "values")).catch(() => {});
+  for (const group of KPI_GROUPS) {
+    await deleteDoc(doc(db, "bulletin", "current", "kpis", group.docId)).catch(() => {});
+  }
 
   statusEl.textContent = "Cleared — ready for next month ✅";
   setTimeout(() => (statusEl.textContent = ""), 4000);
   loadBulletinPreview();
   document.querySelectorAll(".team-form").forEach((form) => loadTeamForm(form.dataset.team));
   loadShoutouts();
-  loadKpiForm();
+  document.querySelectorAll(".kpi-form").forEach((form) => loadKpiForm(form));
 });
 
 // ---------- View modes (?mode=submit / ?mode=view / none = full admin) ----------

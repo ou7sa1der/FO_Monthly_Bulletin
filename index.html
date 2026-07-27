@@ -22,8 +22,8 @@
   <section id="tab-submit" class="tab-panel active">
     <div class="submit-inner">
 
-    <div class="kpi-form">
-      <h2>📊 Monthly KPIs</h2>
+    <div class="kpi-form" data-kpi-group="fo">
+      <h2>🎯 FO KPIs</h2>
       <p class="hint">Shared across both teams — green at 99.8% or above, red below.</p>
       <div class="kpi-input-grid">
         <label>Correct Fixture Data (48h)
@@ -40,13 +40,36 @@
         </label>
       </div>
       <div class="save-row">
-        <button type="button" class="save-btn" id="save-kpis">Save KPIs</button>
-        <span class="save-status" id="kpi-status"></span>
+        <button type="button" class="save-btn" data-action="save-kpi-group">Save FO KPIs</button>
+        <span class="save-status"></span>
+      </div>
+    </div>
+
+    <div class="kpi-form" data-kpi-group="fa">
+      <h2>🛡️ FA KPIs</h2>
+      <p class="hint">Feed Assurance — green at 95% or above, red below.</p>
+      <div class="kpi-input-grid">
+        <label>Feed Uptime
+          <input type="number" class="kpi-input" data-kpi="feedUptime" min="0" max="100" step="0.1" placeholder="e.g. 99.2" />
+        </label>
+        <label>Feed Data Accuracy
+          <input type="number" class="kpi-input" data-kpi="feedDataAccuracy" min="0" max="100" step="0.1" placeholder="e.g. 98.5" />
+        </label>
+        <label>Incident Response Time (SLA)
+          <input type="number" class="kpi-input" data-kpi="incidentResponseSla" min="0" max="100" step="0.1" placeholder="e.g. 96.0" />
+        </label>
+        <label>Statement Quality
+          <input type="number" class="kpi-input" data-kpi="statementQuality" min="0" max="100" step="0.1" placeholder="e.g. 94.0" />
+        </label>
+      </div>
+      <div class="save-row">
+        <button type="button" class="save-btn" data-action="save-kpi-group">Save FA KPIs</button>
+        <span class="save-status"></span>
       </div>
     </div>
 
     <div class="team-form" data-team="foTeam">
-      <h2>FO Team</h2>
+      <h2>FO Delivery</h2>
       <label>Subtitle
         <input type="text" class="team-subtitle" value="Working together. Delivering impact." />
       </label>
@@ -60,13 +83,13 @@
       <button type="button" class="add-btn" data-action="add-upcoming">+ Add an upcoming item</button>
 
       <div class="save-row">
-        <button type="button" class="save-btn" data-action="save-team">Save FO Team</button>
+        <button type="button" class="save-btn" data-action="save-team">Save FO Delivery</button>
         <span class="save-status"></span>
       </div>
     </div>
 
     <div class="team-form" data-team="foSpecialists">
-      <h2>FO Specialists Team</h2>
+      <h2>FO Automation</h2>
       <label>Subtitle
         <input type="text" class="team-subtitle" value="Driving quality. Creating value." />
       </label>
@@ -80,7 +103,7 @@
       <button type="button" class="add-btn" data-action="add-upcoming">+ Add an upcoming item</button>
 
       <div class="save-row">
-        <button type="button" class="save-btn" data-action="save-team">Save FO Specialists Team</button>
+        <button type="button" class="save-btn" data-action="save-team">Save FO Automation</button>
         <span class="save-status"></span>
       </div>
     </div>
@@ -115,7 +138,7 @@
         </div>
         <div class="mockup-header-text">
           <h1>FO Monthly Bulletin</h1>
-          <p>Your monthly snapshot of our results, wins, what's coming up, and the people who make it happen. 💜</p>
+          <p>Your monthly snapshot of our wins, what's coming up, and the people who make it happen. 💜</p>
         </div>
         <svg class="mockup-squiggle" viewBox="0 0 160 90" xmlns="http://www.w3.org/2000/svg">
           <path d="M8,70 C40,85 40,25 80,35 C105,42 110,15 145,18" fill="none" stroke="#b7a9f0" stroke-width="2" stroke-dasharray="6 6" stroke-linecap="round"/>
@@ -128,7 +151,11 @@
         </div>
       </div>
 
-      <div class="mockup-kpis" id="mockup-kpis"></div>
+      <p class="kpi-group-title">🎯 FO KPIs</p>
+      <div class="mockup-kpis" id="mockup-kpis-fo"></div>
+
+      <p class="kpi-group-title">🛡️ FA KPIs</p>
+      <div class="mockup-kpis" id="mockup-kpis-fa"></div>
 
       <div class="mockup-teams">
         <div class="mockup-team-card team-blue" id="card-foTeam"></div>
