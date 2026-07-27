@@ -527,5 +527,5 @@ function escapeHtml(str) {
 }
 function escapeAttr(str) { return escapeHtml(str); }
 function formatKpiValue(value) {
-  return (Math.round(value * 100) / 100).toString();
+  return value.toString();
 }
