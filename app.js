@@ -331,7 +331,7 @@ async function loadBulletinPreview() {
           <div class="kpi-tile ${statusClass}">
             <p class="kpi-label">${escapeHtml(label)}</p>
             <div class="kpi-value-row">
-              <span class="kpi-value">${value === null ? "—" : value.toFixed(1) + "%"}</span>
+              <span class="kpi-value">${value === null ? "—" : formatKpiValue(value) + "%"}</span>
               <span class="kpi-status-text">${statusText}</span>
             </div>
           </div>`;
@@ -526,3 +526,6 @@ function escapeHtml(str) {
   }[c]));
 }
 function escapeAttr(str) { return escapeHtml(str); }
+function formatKpiValue(value) {
+  return (Math.round(value * 100) / 100).toString();
+}
