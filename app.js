@@ -26,17 +26,6 @@ const KPI_GROUPS = [
       { key: "tier2Sla", label: "Tier 2 SLA Creation" },
       { key: "tier35Sla", label: "Tier 3-5 SLA Creation" }
     ]
-  },
-  {
-    id: "fa",
-    docId: "faValues",
-    threshold: 95,
-    defs: [
-      { key: "workingTimeUtilisation", label: "Working Time Utilisation" },
-      { key: "responseTimeNewRequests", label: "Response Time to New Requests" },
-      { key: "resolutionTimeOldRequests", label: "Resolution Time of Old Requests" },
-      { key: "qualityOfStatements", label: "Quality of Statements Provided" }
-    ]
   }
 ];
 function kpiGroup(id) { return KPI_GROUPS.find((g) => g.id === id); }
@@ -197,7 +186,7 @@ async function loadKpiForm(form) {
   }
 }
 
-document.querySelectorAll(".kpi-form").forEach((form) => {
+document.querySelectorAll(".kpi-form[data-kpi-group]").forEach((form) => {
   loadKpiForm(form);
 
   form.querySelector('[data-action="save-kpi-group"]').addEventListener("click", async () => {
@@ -218,6 +207,40 @@ document.querySelectorAll(".kpi-form").forEach((form) => {
       statusEl.textContent = "Save failed — check your connection and try again.";
     }
   });
+});
+
+// ---------- FA: Work Items Completed (count + trend vs last month) ----------
+async function loadWorkItemsForm() {
+  await authReady;
+  const statusEl = document.getElementById("work-items-status");
+  try {
+    const snap = await getDoc(doc(db, "bulletin", "current", "kpis", "workItems"));
+    const data = snap.exists() ? snap.data() : {};
+    document.getElementById("work-items-input").value = typeof data.current === "number" ? data.current : "";
+  } catch (err) {
+    console.error("Failed to load Work Items value:", err);
+    statusEl.textContent = "Couldn't load existing value — check your connection and reload.";
+  }
+}
+loadWorkItemsForm();
+
+document.getElementById("save-work-items").addEventListener("click", async () => {
+  await authReady;
+  const statusEl = document.getElementById("work-items-status");
+  const num = parseInt(document.getElementById("work-items-input").value, 10);
+  if (!Number.isFinite(num) || num < 0) {
+    statusEl.textContent = "Enter a valid non-negative number first.";
+    return;
+  }
+  try {
+    // merge: true — never touches the `previous` field, which only Clear Fields updates.
+    await setDoc(doc(db, "bulletin", "current", "kpis", "workItems"), { current: num }, { merge: true });
+    statusEl.textContent = "Saved ✅";
+    setTimeout(() => (statusEl.textContent = ""), 4000);
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Save failed — check your connection and try again.";
+  }
 });
 
 document.querySelectorAll(".team-form").forEach((form) => {
@@ -317,30 +340,66 @@ async function loadBulletinPreview() {
 
   let hadError = false;
 
+  const fmTiles = [];
+
   for (const group of KPI_GROUPS) {
-    const kpiContainer = document.getElementById(`mockup-kpis-${group.id}`);
     try {
       const kpiSnap = await getDoc(doc(db, "bulletin", "current", "kpis", group.docId));
       const kpiData = kpiSnap.exists() ? kpiSnap.data() : {};
-      kpiContainer.innerHTML = group.defs.map(({ key, label }) => {
+      group.defs.forEach(({ key, label }) => {
         const value = typeof kpiData[key] === "number" ? kpiData[key] : null;
         const isGood = value !== null && value >= group.threshold;
         const statusClass = value === null ? "" : isGood ? "status-good" : "status-critical";
         const statusText = value === null ? "No data yet" : isGood ? "✅ On target" : "⚠️ Below target";
-        return `
+        fmTiles.push(`
           <div class="kpi-tile ${statusClass}">
             <p class="kpi-label">${escapeHtml(label)}</p>
             <div class="kpi-value-row">
               <span class="kpi-value">${value === null ? "—" : formatKpiValue(value) + "%"}</span>
               <span class="kpi-status-text">${statusText}</span>
             </div>
-          </div>`;
-      }).join("");
+          </div>`);
+      });
     } catch (err) {
       console.error(`Failed to load KPIs for group ${group.id}:`, err);
-      kpiContainer.innerHTML = `<div class="kpi-tile"><p class="kpi-label">Couldn't load KPIs — check your connection and hit Refresh.</p></div>`;
+      fmTiles.push(`<div class="kpi-tile"><p class="kpi-label">Couldn't load ${escapeHtml(group.id.toUpperCase())} KPIs — check your connection and hit Refresh.</p></div>`);
       hadError = true;
     }
+  }
+  document.getElementById("mockup-kpis-fm").innerHTML = fmTiles.join("");
+
+  const faContainer = document.getElementById("mockup-kpis-fa");
+  try {
+    const workItemsSnap = await getDoc(doc(db, "bulletin", "current", "kpis", "workItems"));
+    const workItemsData = workItemsSnap.exists() ? workItemsSnap.data() : {};
+    const current = typeof workItemsData.current === "number" ? workItemsData.current : null;
+    const previous = typeof workItemsData.previous === "number" ? workItemsData.previous : null;
+
+    let statusClass = "";
+    let statusText = "No data yet";
+    if (current !== null && previous !== null) {
+      const delta = current - previous;
+      const pct = previous !== 0 ? Math.abs((delta / previous) * 100) : null;
+      const pctText = pct !== null ? ` (${pct.toFixed(1)}%)` : "";
+      if (delta > 0) { statusClass = "status-good"; statusText = `▲ +${delta}${pctText} vs last month`; }
+      else if (delta < 0) { statusClass = "status-critical"; statusText = `▼ ${delta}${pctText} vs last month`; }
+      else { statusText = "— No change vs last month"; }
+    } else if (current !== null) {
+      statusText = "No comparison yet";
+    }
+
+    faContainer.innerHTML = `
+      <div class="kpi-tile ${statusClass}">
+        <p class="kpi-label">Work Items Completed</p>
+        <div class="kpi-value-row">
+          <span class="kpi-value">${current === null ? "—" : current}</span>
+          <span class="kpi-status-text">${statusText}</span>
+        </div>
+      </div>`;
+  } catch (err) {
+    console.error("Failed to load Work Items:", err);
+    faContainer.innerHTML = `<div class="kpi-tile"><p class="kpi-label">Couldn't load Work Items — check your connection and hit Refresh.</p></div>`;
+    hadError = true;
   }
 
   for (const teamId of Object.keys(TEAM_DEFAULTS)) {
@@ -490,13 +549,24 @@ document.getElementById("clear-btn").addEventListener("click", async () => {
   for (const group of KPI_GROUPS) {
     await deleteDoc(doc(db, "bulletin", "current", "kpis", group.docId)).catch(() => {});
   }
+  // Work Items Completed carries forward instead of clearing outright: this
+  // month's `current` becomes next month's `previous`, so the trend line
+  // always compares against whatever was last active before this reset.
+  const workItemsSnap = await getDoc(doc(db, "bulletin", "current", "kpis", "workItems"));
+  const lastCurrent = workItemsSnap.exists() && typeof workItemsSnap.data().current === "number"
+    ? workItemsSnap.data().current
+    : null;
+  if (lastCurrent !== null) {
+    await setDoc(doc(db, "bulletin", "current", "kpis", "workItems"), { previous: lastCurrent, current: null });
+  }
 
   statusEl.textContent = "Cleared — ready for next month ✅";
   setTimeout(() => (statusEl.textContent = ""), 4000);
   loadBulletinPreview();
   document.querySelectorAll(".team-form").forEach((form) => loadTeamForm(form.dataset.team));
   loadShoutouts();
-  document.querySelectorAll(".kpi-form").forEach((form) => loadKpiForm(form));
+  document.querySelectorAll(".kpi-form[data-kpi-group]").forEach((form) => loadKpiForm(form));
+  loadWorkItemsForm();
 });
 
 // ---------- View modes (?mode=submit / ?mode=view / none = full admin) ----------
