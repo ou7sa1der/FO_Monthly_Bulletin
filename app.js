@@ -385,7 +385,7 @@ async function loadBulletinPreview() {
       else if (delta < 0) { statusClass = "status-critical"; statusText = `▼ ${delta}${pctText} vs last month`; }
       else { statusText = "— No change vs last month"; }
     } else if (current !== null) {
-      statusText = "No comparison yet";
+      statusText = "";
     }
 
     faContainer.innerHTML = `
