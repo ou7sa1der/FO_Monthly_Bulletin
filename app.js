@@ -365,6 +365,14 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
       compress: true
     });
     pdf.addImage(canvas, "PNG", 0, 0, canvas.width, canvas.height);
+    // Sets the PDF's default open zoom to 50% instead of "actual size" (which
+    // would render this huge — the page is exactly canvas.width×canvas.height
+    // PDF points, e.g. ~1400pt wide, and a PDF point is 1/72 inch). Honored by
+    // desktop viewers like Adobe Reader; Chrome/Edge's built-in viewer and
+    // Slack's inline preview generally ignore embedded zoom and use their own
+    // fit-to-window logic regardless, so this mainly helps people who download
+    // and open the file in a full PDF reader app.
+    pdf.setDisplayMode("50%", "continuous", "UseNone");
     pdf.save(`fo-monthly-bulletin-${new Date().toISOString().slice(0, 7)}.pdf`);
     statusEl.textContent = "Downloaded ✅";
   } catch (err) {
