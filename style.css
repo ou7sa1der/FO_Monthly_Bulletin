@@ -47,30 +47,12 @@ main { margin: 24px auto; padding: 0 16px 60px; }
 
 /* ---------- Submit form styling ---------- */
 
-.kpi-form, .team-form, .shoutouts-form {
+.team-form, .shoutouts-form {
   background: #fff;
   border: 1px solid #e2e4e9;
   border-radius: 12px;
   padding: 20px 24px;
   margin-bottom: 24px;
-}
-
-.kpi-input-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 4px;
-}
-.kpi-input-grid label { font-size: 13px; color: #555; }
-.kpi-input {
-  display: block;
-  width: 100%;
-  margin-top: 4px;
-  padding: 8px 10px;
-  border: 1px solid #d5d8de;
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
 }
 
 .team-form h2 { margin-top: 0; }
@@ -255,51 +237,6 @@ main { margin: 24px auto; padding: 0 16px 60px; }
   flex-shrink: 0;
 }
 .mockup-date-badge small { font-weight: 400; color: #777; font-size: 13px; }
-
-.kpi-row { display: flex; align-items: stretch; gap: 18px; margin-bottom: 20px; }
-
-.kpi-source-block { display: flex; flex-direction: column; min-width: 0; }
-.kpi-source-fm { flex: 4; }
-.kpi-source-fa { flex: 1; }
-
-.kpi-source-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #9a9a9a;
-  margin-bottom: 8px;
-}
-
-.kpi-source-divider { width: 1px; background: #e2e4e9; align-self: stretch; }
-
-.mockup-kpis { display: flex; gap: 12px; flex: 1; flex-wrap: wrap; }
-
-.kpi-tile {
-  flex: 1;
-  min-width: 150px;
-  background: #fafafa;
-  border: 1px solid #e2e4e9;
-  border-radius: 14px;
-  padding: 14px 16px;
-  border-left: 4px solid transparent;
-}
-.kpi-tile.status-good { border-left-color: #0ca30c; background: #f3fbf1; }
-.kpi-tile.status-critical { border-left-color: #d03b3b; background: #fdf3f3; }
-
-.kpi-label {
-  margin: 0 0 8px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: #52514e;
-  overflow-wrap: break-word;
-  word-break: break-word;
-}
-.kpi-value-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.kpi-value { font-size: 30px; font-weight: 700; color: #0b0b0b; line-height: 1; }
-.kpi-status-text { font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
-.kpi-tile.status-good .kpi-status-text { color: #006300; }
-.kpi-tile.status-critical .kpi-status-text { color: #d03b3b; }
 
 .mockup-teams { display: flex; gap: 22px; margin-bottom: 24px; }
 

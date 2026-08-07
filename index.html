@@ -22,43 +22,6 @@
   <section id="tab-submit" class="tab-panel active">
     <div class="submit-inner">
 
-    <div class="kpi-form" data-kpi-group="fo">
-      <h2>🎯 FM KPIs</h2>
-      <p class="hint">Shared across both teams — green at 99.8% or above, red below.</p>
-      <div class="kpi-input-grid">
-        <label>Correct Fixture Data (48h)
-          <input type="number" class="kpi-input" data-kpi="correctFixtures" min="0" max="100" step="0.1" placeholder="e.g. 98.9" />
-        </label>
-        <label>Tier 1 SLA Creation
-          <input type="number" class="kpi-input" data-kpi="tier1Sla" min="0" max="100" step="0.1" placeholder="e.g. 99.9" />
-        </label>
-        <label>Tier 2 SLA Creation
-          <input type="number" class="kpi-input" data-kpi="tier2Sla" min="0" max="100" step="0.1" placeholder="e.g. 99.9" />
-        </label>
-        <label>Tier 3-5 SLA Creation
-          <input type="number" class="kpi-input" data-kpi="tier35Sla" min="0" max="100" step="0.1" placeholder="e.g. 99.9" />
-        </label>
-      </div>
-      <div class="save-row">
-        <button type="button" class="save-btn" data-action="save-kpi-group">Save FM KPIs</button>
-        <span class="save-status"></span>
-      </div>
-    </div>
-
-    <div class="kpi-form work-items-form">
-      <h2>🛡️ FA — Work Items Completed</h2>
-      <p class="hint">Total Jira tickets completed this month. Automatically compared to last month's total once saved.</p>
-      <div class="kpi-input-grid" style="grid-template-columns: 1fr;">
-        <label>Work Items Completed
-          <input type="number" id="work-items-input" min="0" step="1" placeholder="e.g. 128" />
-        </label>
-      </div>
-      <div class="save-row">
-        <button type="button" class="save-btn" id="save-work-items">Save Work Items</button>
-        <span class="save-status" id="work-items-status"></span>
-      </div>
-    </div>
-
     <div class="team-form" data-team="foTeam">
       <h2>FO Delivery</h2>
       <label>Subtitle
@@ -139,18 +102,6 @@
         </svg>
         <div class="mockup-date-badge">
           <div id="mockup-date"></div>
-        </div>
-      </div>
-
-      <div class="kpi-row">
-        <div class="kpi-source-block kpi-source-fm">
-          <span class="kpi-source-label">🎯 FM</span>
-          <div class="mockup-kpis" id="mockup-kpis-fm"></div>
-        </div>
-        <div class="kpi-source-divider"></div>
-        <div class="kpi-source-block kpi-source-fa">
-          <span class="kpi-source-label">🛡️ FA</span>
-          <div class="mockup-kpis" id="mockup-kpis-fa"></div>
         </div>
       </div>
 
