@@ -360,51 +360,8 @@ function createPdfFromCanvas(canvas) {
   return pdf;
 }
 
-function canvasToBlob(canvas, type, quality) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("The bulletin preview image could not be generated."));
-    }, type, quality);
-  });
-}
-
-async function createPreviewBlob(sourceCanvas) {
-  const attempts = [
-    { maxWidth: 1000, quality: 0.82 },
-    { maxWidth: 900, quality: 0.72 },
-    { maxWidth: 760, quality: 0.62 }
-  ];
-
-  for (const attempt of attempts) {
-    const scale = Math.min(1, attempt.maxWidth / sourceCanvas.width);
-    const previewCanvas = document.createElement("canvas");
-    previewCanvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
-    previewCanvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
-    const context = previewCanvas.getContext("2d");
-    if (!context) throw new Error("The bulletin preview canvas is unavailable.");
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    context.drawImage(sourceCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
-    const blob = await canvasToBlob(previewCanvas, "image/jpeg", attempt.quality);
-    if (blob.size <= MAX_QUEUED_PREVIEW_BYTES) return blob;
-  }
-
-  throw new Error("The generated preview image is larger than 140 KB. Shorten the bulletin and try again.");
-}
-
 async function createBulletinPdf() {
   return createPdfFromCanvas(await captureBulletinCanvas());
-}
-
-async function createBulletinSlackAssets() {
-  const canvas = await captureBulletinCanvas();
-  return {
-    pdf: createPdfFromCanvas(canvas),
-    previewBlob: await createPreviewBlob(canvas)
-  };
 }
 
 function getBulletinPeriod() {
@@ -444,9 +401,7 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
 const sendSlackBtn = document.getElementById("send-slack-btn");
 const deleteSlackBtn = document.getElementById("delete-slack-btn");
 const slackStatusEl = document.getElementById("slack-status");
-// Keep the combined base64 payload safely below Firestore's 1 MiB document limit.
-const MAX_QUEUED_PDF_BYTES = 520 * 1024;
-const MAX_QUEUED_PREVIEW_BYTES = 140 * 1024;
+const MAX_QUEUED_PDF_BYTES = 650 * 1024;
 
 function setSlackControlsBusy(busy, action = "") {
   sendSlackBtn.disabled = busy;
@@ -468,8 +423,9 @@ async function queueSlackJob(payload) {
 }
 
 async function waitForSlackJob(jobRef, action) {
-  // The scheduled workflow normally starts within five minutes. If the page is
-  // closed, the queued job still continues in GitHub Actions.
+  // The queued job continues even when the page is closed. GitHub's scheduled
+  // trigger is best effort, so a repository owner can run the workflow manually
+  // when immediate processing is needed.
   for (let attempt = 0; attempt < 120; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
     const snapshot = await getDoc(jobRef);
@@ -483,29 +439,27 @@ async function waitForSlackJob(jobRef, action) {
     if (job.status === "rejected" || job.status === "failed") {
       throw new Error(job.message || "The Slack request failed.");
     }
-    if (job.status === "prepared") {
-      slackStatusEl.textContent = "Publishing the permanent PDF and preview…";
-    } else if (job.status === "processing") {
+    if (job.status === "processing") {
       slackStatusEl.textContent = "GitHub Actions is processing the request…";
     } else {
-      slackStatusEl.textContent = "Queued — GitHub Actions checks every 5 minutes…";
+      slackStatusEl.textContent = "Queued — waiting for GitHub Actions…";
     }
   }
-  return "Still queued — it will continue even if you close this page.";
+  return "Still queued — GitHub's schedule is delayed; the request remains saved.";
 }
 
 sendSlackBtn.addEventListener("click", async () => {
   const period = getBulletinPeriod();
-  if (!confirm(`Publish and send the ${period.label} bulletin PDF and preview to Slack?`)) return;
+  if (!confirm(`Send the ${period.label} bulletin PDF to Slack?`)) return;
 
   setSlackControlsBusy(true, "send");
   sendSlackBtn.textContent = "Preparing PDF…";
   slackStatusEl.textContent = "Generating PDF…";
   try {
-    const { pdf, previewBlob } = await createBulletinSlackAssets();
+    const pdf = await createBulletinPdf();
     const pdfBlob = pdf.output("blob");
     if (pdfBlob.size > MAX_QUEUED_PDF_BYTES) {
-      throw new Error(`The generated PDF is ${(pdfBlob.size / 1024).toFixed(0)} KB; the archive queue limit is 520 KB.`);
+      throw new Error(`The generated PDF is ${(pdfBlob.size / 1024).toFixed(0)} KB; the Slack queue limit is 650 KB.`);
     }
     slackStatusEl.textContent = "Adding the request to the secure queue…";
     const jobRef = await queueSlackJob({
@@ -514,13 +468,10 @@ sendSlackBtn.addEventListener("click", async () => {
       periodLabel: period.label,
       filename: period.filename,
       pdfBytes: pdfBlob.size,
-      pdfBase64: await blobToBase64(pdfBlob),
-      previewFilename: period.filename.replace(/\.pdf$/i, "-preview.jpg"),
-      previewBytes: previewBlob.size,
-      previewBase64: await blobToBase64(previewBlob)
+      pdfBase64: await blobToBase64(pdfBlob)
     });
     setSlackControlsBusy(true, "send");
-    slackStatusEl.textContent = "Queued — GitHub Actions checks every 5 minutes…";
+    slackStatusEl.textContent = "Queued — waiting for GitHub Actions…";
     slackStatusEl.textContent = await waitForSlackJob(jobRef, "send");
   } catch (err) {
     console.error(err);
@@ -542,7 +493,7 @@ deleteSlackBtn.addEventListener("click", async () => {
       periodKey: period.key,
       periodLabel: period.label
     });
-    slackStatusEl.textContent = "Queued — GitHub Actions checks every 5 minutes…";
+    slackStatusEl.textContent = "Queued — waiting for GitHub Actions…";
     slackStatusEl.textContent = await waitForSlackJob(jobRef, "delete");
   } catch (err) {
     console.error(err);
