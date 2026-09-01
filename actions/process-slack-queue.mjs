@@ -330,6 +330,24 @@ function validateJob(job) {
   return pdf;
 }
 
+function coalesceQueuedJobs(jobs) {
+  const latestByPeriodAndAction = new Map();
+  const superseded = [];
+
+  for (const job of [...jobs].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
+    const key = `${job.action}:${job.periodKey}`;
+    const previous = latestByPeriodAndAction.get(key);
+    if (previous) superseded.push(previous);
+    latestByPeriodAndAction.set(key, job);
+  }
+
+  return {
+    selected: [...latestByPeriodAndAction.values()]
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))),
+    superseded
+  };
+}
+
 async function deleteDelivery(delivery, token) {
   if (delivery.messageTs) {
     try {
@@ -349,7 +367,7 @@ async function deleteDelivery(delivery, token) {
 
 async function processJob(store, queuedJob, token) {
   const job = await store.claim(queuedJob.path);
-  if (!job) return;
+  if (!job) return "skipped";
   try {
     const pdf = validateJob(job);
     const state = await store.periodState(job.periodKey);
@@ -359,16 +377,16 @@ async function processJob(store, queuedJob, token) {
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
       if (!delivery) {
         await store.finish(job.path, "rejected", { message: "There is no Slack post to delete for this month." });
-        return;
+        return "rejected";
       }
       await deleteDelivery(delivery, token);
       await store.markDeleted(delivery);
       await store.finish(job.path, "succeeded", { message: "Last Slack post and PDF deleted." });
-      return;
+      return "succeeded";
     }
     if (state.successfulSends >= MAX_SENDS) {
       await store.finish(job.path, "rejected", { message: "The monthly Slack limit of 3 successful sends has been reached." });
-      return;
+      return "rejected";
     }
     const uploaded = await uploadPdf(pdf, job.filename, token);
     const delivery = {
@@ -383,6 +401,7 @@ async function processJob(store, queuedJob, token) {
     try {
       const successfulSends = await store.recordDelivery(job.periodKey, delivery);
       await store.finish(job.path, "succeeded", { successfulSends, message: "Sent to Slack." });
+      return "succeeded";
     } catch (error) {
       await deleteDelivery(delivery, token).catch(() => {});
       throw error;
@@ -392,6 +411,7 @@ async function processJob(store, queuedJob, token) {
     await store.finish(job.path, error.code === "MONTHLY_LIMIT" ? "rejected" : "failed", {
       message: error.message.slice(0, 300)
     });
+    return error.code === "MONTHLY_LIMIT" ? "rejected" : "failed";
   }
 }
 
@@ -401,7 +421,26 @@ async function main() {
   const store = new Firestore(parseServiceAccount());
   const jobs = await store.queuedJobs();
   console.log(`Found ${jobs.length} queued Slack request(s).`);
-  for (const job of jobs) await processJob(store, job, token);
+  const { selected, superseded } = coalesceQueuedJobs(jobs);
+
+  for (const queuedJob of superseded) {
+    const job = await store.claim(queuedJob.path);
+    if (!job) continue;
+    await store.finish(job.path, "rejected", {
+      message: "A newer Slack request for this month was queued before processing. Only the newest request was sent."
+    });
+    console.log(`Rejected duplicate ${job.action} request for ${job.periodKey}.`);
+  }
+
+  const results = [];
+  for (const job of selected) {
+    const status = await processJob(store, job, token);
+    results.push({ job, status });
+    console.log(`Processed ${job.action} request for ${job.periodKey}: ${status}.`);
+  }
+
+  const failed = results.filter(({ status }) => status === "failed");
+  if (failed.length) throw new Error(`${failed.length} Slack request(s) failed. See the job log above.`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -413,6 +452,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
 export {
   CHANNEL_ID,
+  coalesceQueuedJobs,
   MAX_PDF_BYTES,
   MESSAGE,
   findMessageTs,

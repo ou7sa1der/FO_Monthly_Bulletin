@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CHANNEL_ID,
+  coalesceQueuedJobs,
   MAX_PDF_BYTES,
   MESSAGE,
   findMessageTs,
@@ -63,4 +64,17 @@ test("finds uploaded file message timestamps for public and private channels", (
 test("round-trips Firestore REST values", () => {
   const value = { count: 3, ok: true, labels: ["one", "two"] };
   assert.deepEqual(fromValue(toValue(value)), value);
+});
+
+test("keeps only the newest queued request for each action and period", () => {
+  const jobs = [
+    { path: "old-send", action: "send", periodKey: "2026-08", createdAt: "2026-08-01T10:00:00Z" },
+    { path: "delete", action: "delete", periodKey: "2026-08", createdAt: "2026-08-01T10:01:00Z" },
+    { path: "new-send", action: "send", periodKey: "2026-08", createdAt: "2026-08-01T10:02:00Z" },
+    { path: "next-month", action: "send", periodKey: "2026-09", createdAt: "2026-08-01T10:03:00Z" }
+  ];
+
+  const result = coalesceQueuedJobs(jobs);
+  assert.deepEqual(result.superseded.map((job) => job.path), ["old-send"]);
+  assert.deepEqual(result.selected.map((job) => job.path), ["delete", "new-send", "next-month"]);
 });
