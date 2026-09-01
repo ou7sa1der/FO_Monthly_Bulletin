@@ -1,17 +1,10 @@
 import { randomUUID, sign } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const PROJECT_ID = "fo-bulletin";
 const CHANNEL_ID = process.env.SLACK_CHANNEL_ID || "C0AFA7FR5EZ";
-const PUBLIC_SITE_BASE_URL = (process.env.PUBLIC_SITE_BASE_URL ||
-  "https://ou7sa1der.github.io/FO_Monthly_Bulletin").replace(/\/+$/, "");
-const ARCHIVE_ROOT = "bulletins";
-const PLAN_PATH = ".slack-publish-plan.json";
 const MAX_SENDS = 3;
-const MAX_PDF_BYTES = 520 * 1024;
-const MAX_PREVIEW_BYTES = 140 * 1024;
+const MAX_PDF_BYTES = 650 * 1024;
 const MESSAGE = "📋 *Fixtures Operations Monthly Bulletin* is ready!\n\n" +
   "This month's compiled update from every FO team is live — check it out here:\n\n" +
   "Thanks to everyone who contributed this month! 🙌";
@@ -33,14 +26,6 @@ function parseServiceAccount() {
     throw new Error(`The Firebase service account must belong to ${PROJECT_ID}.`);
   }
   return account;
-}
-
-function slackToken() {
-  const token = requiredEnv("SLACK_BOT_TOKEN");
-  if (!token.startsWith("xoxb-")) {
-    throw new Error("SLACK_BOT_TOKEN must be a bot token beginning with xoxb-.");
-  }
-  return token;
 }
 
 function jwtPart(value) {
@@ -143,11 +128,6 @@ class Firestore {
     return this.request(`${this.url(documentPath)}${suffix}`, {}, true);
   }
 
-  async decoded(documentPath) {
-    const document = await this.get(documentPath);
-    return document ? { path: documentPath, ...decodeFields(document.fields) } : null;
-  }
-
   async list(documentPath) {
     return this.request(`${this.url(documentPath)}?pageSize=50&orderBy=createdAt%20desc`);
   }
@@ -170,18 +150,16 @@ class Firestore {
     });
   }
 
-  async jobs() {
+  async queuedJobs() {
     const result = await this.list("bulletin/current/slackQueue");
     return (result.documents || [])
       .map((document) => ({
         path: document.name.split("/documents/")[1],
         ...decodeFields(document.fields)
       }))
-      .filter((job) => job.status === "queued" || job.status === "prepared")
-      .sort((a, b) => {
-        const statusOrder = Number(b.status === "prepared") - Number(a.status === "prepared");
-        return statusOrder || String(a.createdAt).localeCompare(String(b.createdAt));
-      });
+      .filter((job) => job.status === "queued")
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+      .slice(0, 10);
   }
 
   async claim(documentPath) {
@@ -217,18 +195,6 @@ class Firestore {
     await this.request(`${this.url(documentPath)}?${masks}`, {
       method: "PATCH",
       body: JSON.stringify({ fields: encodeFields(values) })
-    });
-  }
-
-  async markPrepared(documentPath, archive) {
-    await this.patch(documentPath, {
-      status: "prepared",
-      preparedAt: new Date().toISOString(),
-      archiveVersion: archive.version,
-      pdfFilename: archive.pdfFilename,
-      previewFilenamePublished: archive.previewFilename,
-      pdfUrl: archive.pdfUrl,
-      previewUrl: archive.previewUrl
     });
   }
 
@@ -297,14 +263,14 @@ class Firestore {
   }
 }
 
-async function slackApi(method, payload, token) {
+async function slackApi(method, payload, token, formEncoded = false) {
   const response = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8"
+      "Content-Type": formEncoded ? "application/x-www-form-urlencoded" : "application/json; charset=utf-8"
     },
-    body: JSON.stringify(payload)
+    body: formEncoded ? new URLSearchParams(payload).toString() : JSON.stringify(payload)
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) {
@@ -315,222 +281,114 @@ async function slackApi(method, payload, token) {
   return result;
 }
 
-function archiveFor(job, version) {
-  if (!Number.isInteger(version) || version < 1 || version > MAX_SENDS) {
-    throw new Error("Invalid bulletin archive version.");
+function findMessageTs(file) {
+  for (const visibility of ["public", "private"]) {
+    const messages = file?.shares?.[visibility]?.[CHANNEL_ID];
+    if (messages?.[0]?.ts) return messages[0].ts;
   }
-  const stem = `fo-monthly-bulletin-${job.periodKey}-v${version}`;
-  const relativeDir = path.posix.join(ARCHIVE_ROOT, job.periodKey, `v${version}`);
-  const pdfFilename = `${stem}.pdf`;
-  const previewFilename = `${stem}-preview.jpg`;
-  const pdfRelativePath = path.posix.join(relativeDir, pdfFilename);
-  const previewRelativePath = path.posix.join(relativeDir, previewFilename);
-  return {
-    version,
-    pdfFilename,
-    previewFilename,
-    pdfRelativePath,
-    previewRelativePath,
-    pdfUrl: `${PUBLIC_SITE_BASE_URL}/${pdfRelativePath}`,
-    previewUrl: `${PUBLIC_SITE_BASE_URL}/${previewRelativePath}`
-  };
+  return null;
+}
+
+async function uploadPdf(pdf, filename, token) {
+  const ticket = await slackApi("files.getUploadURLExternal", {
+    filename,
+    length: String(pdf.length)
+  }, token, true);
+
+  const uploaded = await fetch(ticket.upload_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/pdf" },
+    body: pdf
+  });
+  if (!uploaded.ok) throw new Error(`Slack file upload failed: HTTP ${uploaded.status}`);
+
+  const completed = await slackApi("files.completeUploadExternal", {
+    files: [{ id: ticket.file_id, title: filename }],
+    channel_id: CHANNEL_ID,
+    initial_comment: MESSAGE
+  }, token);
+
+  let messageTs = findMessageTs(completed.files?.[0]);
+  for (let attempt = 0; attempt < 4 && !messageTs; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 500));
+    const info = await slackApi("files.info", { file: ticket.file_id }, token, true);
+    messageTs = findMessageTs(info.file);
+  }
+  return { fileId: ticket.file_id, messageTs };
 }
 
 function validateJob(job) {
   if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(job.periodKey || "")) throw new Error("Invalid bulletin period.");
   if (!String(job.periodLabel || "").trim() || String(job.periodLabel).length > 40) throw new Error("Invalid bulletin period label.");
-  if (job.action === "delete") return { action: "delete" };
+  if (job.action === "delete") return undefined;
   if (job.action !== "send") throw new Error("Invalid Slack action.");
-  if (!/^fo-monthly-bulletin-[0-9]{4}-(0[1-9]|1[0-2])\.pdf$/.test(job.filename || "")) {
-    throw new Error("Invalid PDF filename.");
-  }
-  if (!/^fo-monthly-bulletin-[0-9]{4}-(0[1-9]|1[0-2])-preview\.jpg$/.test(job.previewFilename || "")) {
-    throw new Error("Invalid preview filename.");
-  }
+  if (!/^fo-monthly-bulletin-[0-9]{4}-(0[1-9]|1[0-2])\.pdf$/.test(job.filename || "")) throw new Error("Invalid PDF filename.");
   const pdf = Buffer.from(job.pdfBase64 || "", "base64");
-  if (!pdf.length || pdf.length > MAX_PDF_BYTES || pdf.length !== Number(job.pdfBytes) ||
-      pdf.subarray(0, 4).toString("ascii") !== "%PDF") {
+  if (!pdf.length || pdf.length > MAX_PDF_BYTES || pdf.length !== Number(job.pdfBytes) || pdf.subarray(0, 4).toString("ascii") !== "%PDF") {
     throw new Error("The queued attachment is not a valid PDF.");
   }
-  const preview = Buffer.from(job.previewBase64 || "", "base64");
-  if (!preview.length || preview.length > MAX_PREVIEW_BYTES || preview.length !== Number(job.previewBytes) ||
-      preview[0] !== 0xff || preview[1] !== 0xd8 || preview[2] !== 0xff) {
-    throw new Error("The queued bulletin preview is not a valid JPEG image.");
-  }
-  return { action: "send", pdf, preview };
-}
-
-async function writeArchiveAssets(archive, assets) {
-  const pdfPath = path.resolve(archive.pdfRelativePath);
-  const previewPath = path.resolve(archive.previewRelativePath);
-  const archiveRootPath = `${path.resolve(ARCHIVE_ROOT)}${path.sep}`;
-  if (!pdfPath.startsWith(archiveRootPath) || !previewPath.startsWith(archiveRootPath)) {
-    throw new Error("Invalid archive destination.");
-  }
-  await mkdir(path.dirname(pdfPath), { recursive: true });
-  await writeFile(pdfPath, assets.pdf);
-  await writeFile(previewPath, assets.preview);
-}
-
-function buildSlackPayload(job, archive) {
-  const pdfLink = `📄 *PDF:* <${archive.pdfUrl}|${archive.pdfFilename}>`;
-  return {
-    channel: CHANNEL_ID,
-    text: `${MESSAGE.replaceAll("*", "")}\n\nPDF: ${archive.pdfUrl}`,
-    unfurl_links: false,
-    unfurl_media: false,
-    blocks: [
-      {
-        type: "section",
-        text: { type: "mrkdwn", text: `${MESSAGE}\n\n${pdfLink}` }
-      },
-      {
-        type: "image",
-        image_url: archive.previewUrl,
-        alt_text: `FO Monthly Bulletin for ${job.periodLabel}`,
-        title: { type: "plain_text", text: archive.pdfFilename, emoji: true }
-      }
-    ]
-  };
-}
-
-async function postArchiveMessage(job, archive, token) {
-  const result = await slackApi("chat.postMessage", buildSlackPayload(job, archive), token);
-  if (!result.ts) throw new Error("Slack did not return a message timestamp.");
-  return { messageTs: result.ts };
+  return pdf;
 }
 
 async function deleteDelivery(delivery, token) {
-  if (!delivery.messageTs) throw new Error("The stored Slack post has no message timestamp.");
-  try {
-    await slackApi("chat.delete", { channel: CHANNEL_ID, ts: delivery.messageTs }, token);
-  } catch (error) {
-    if (error.slackCode !== "message_not_found") throw error;
-  }
-}
-
-async function waitForPublicAsset(url) {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const response = await fetch(url, { cache: "no-store" }).catch(() => null);
-    if (response?.ok) return;
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-  throw new Error(`The published archive is not reachable yet: ${url}`);
-}
-
-async function processDelete(store, job) {
-  const state = await store.periodState(job.periodKey);
-  const delivery = state.deliveries
-    .filter((item) => item.status === "success")
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
-  if (!delivery) {
-    await store.finish(job.path, "rejected", { message: "There is no Slack post to delete for this month." });
-    return;
-  }
-  await deleteDelivery(delivery, slackToken());
-  await store.markDeleted(delivery);
-  await store.finish(job.path, "succeeded", { message: "Last Slack post deleted; its public archive was kept." });
-}
-
-async function prepareJob(store, listedJob) {
-  let job = listedJob;
-  if (job.status === "queued") {
-    job = await store.claim(job.path);
-    if (!job) return;
-  }
-
-  try {
-    const assets = validateJob(job);
-    if (job.action === "delete") {
-      await processDelete(store, job);
-      return;
+  if (delivery.messageTs) {
+    try {
+      await slackApi("chat.delete", { channel: CHANNEL_ID, ts: delivery.messageTs }, token);
+    } catch (error) {
+      if (error.slackCode !== "message_not_found") throw error;
     }
+  }
+  if (delivery.fileId) {
+    try {
+      await slackApi("files.delete", { file: delivery.fileId }, token);
+    } catch (error) {
+      if (!["file_not_found", "file_deleted"].includes(error.slackCode)) throw error;
+    }
+  }
+}
 
+async function processJob(store, queuedJob, token) {
+  const job = await store.claim(queuedJob.path);
+  if (!job) return;
+  try {
+    const pdf = validateJob(job);
     const state = await store.periodState(job.periodKey);
-    const existingDelivery = state.deliveries.find((delivery) => delivery.jobPath === job.path && delivery.status === "success");
-    if (existingDelivery) {
-      await store.finish(job.path, "succeeded", {
-        successfulSends: state.successfulSends,
-        message: "Sent to Slack."
-      });
+    if (job.action === "delete") {
+      const delivery = state.deliveries
+        .filter((item) => item.status === "success")
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+      if (!delivery) {
+        await store.finish(job.path, "rejected", { message: "There is no Slack post to delete for this month." });
+        return;
+      }
+      await deleteDelivery(delivery, token);
+      await store.markDeleted(delivery);
+      await store.finish(job.path, "succeeded", { message: "Last Slack post and PDF deleted." });
       return;
     }
     if (state.successfulSends >= MAX_SENDS) {
       await store.finish(job.path, "rejected", { message: "The monthly Slack limit of 3 successful sends has been reached." });
       return;
     }
-
-    const version = job.status === "prepared" ? Number(job.archiveVersion) : state.successfulSends + 1;
-    if (version !== state.successfulSends + 1) {
-      throw new Error("The prepared archive version is no longer available. Queue the bulletin again.");
-    }
-    const archive = archiveFor(job, version);
-    await writeArchiveAssets(archive, assets);
-    if (job.status !== "prepared") await store.markPrepared(job.path, archive);
-    await writeFile(PLAN_PATH, `${JSON.stringify({ jobPath: job.path, version }, null, 2)}\n`, "utf8");
-    console.log(`Prepared ${archive.pdfRelativePath} and ${archive.previewRelativePath}.`);
-  } catch (error) {
-    console.error(`Job ${job.path} failed during preparation: ${error.message}`);
-    await store.finish(job.path, error.code === "MONTHLY_LIMIT" ? "rejected" : "failed", {
-      message: error.message.slice(0, 300)
-    });
-  }
-}
-
-async function prepareMain() {
-  await rm(PLAN_PATH, { force: true });
-  const store = new Firestore(parseServiceAccount());
-  const jobs = await store.jobs();
-  console.log(`Found ${jobs.length} queued or prepared Slack request(s).`);
-  if (jobs[0]) await prepareJob(store, jobs[0]);
-}
-
-async function finalizeMain() {
-  const plan = JSON.parse(await readFile(PLAN_PATH, "utf8"));
-  const store = new Firestore(parseServiceAccount());
-  const job = await store.decoded(plan.jobPath);
-  if (!job || job.status !== "prepared") throw new Error("The prepared Slack job could not be found.");
-  validateJob(job);
-  const archive = archiveFor(job, Number(plan.version));
-  await waitForPublicAsset(archive.pdfUrl);
-  await waitForPublicAsset(archive.previewUrl);
-
-  const state = await store.periodState(job.periodKey);
-  const existingDelivery = state.deliveries.find((delivery) => delivery.jobPath === job.path && delivery.status === "success");
-  if (existingDelivery) {
-    await store.finish(job.path, "succeeded", { successfulSends: state.successfulSends, message: "Sent to Slack." });
-    return;
-  }
-  if (state.successfulSends !== archive.version - 1) {
-    await store.finish(job.path, "rejected", { message: "The monthly archive version changed before Slack delivery." });
-    return;
-  }
-
-  let posted;
-  try {
-    posted = await postArchiveMessage(job, archive, slackToken());
+    const uploaded = await uploadPdf(pdf, job.filename, token);
     const delivery = {
-      ...posted,
+      ...uploaded,
       jobPath: job.path,
       channelId: CHANNEL_ID,
-      archiveVersion: archive.version,
-      filename: archive.pdfFilename,
-      pdfUrl: archive.pdfUrl,
-      previewUrl: archive.previewUrl,
+      filename: job.filename,
       periodLabel: job.periodLabel,
       status: "success",
       createdAt: new Date().toISOString()
     };
-    const successfulSends = await store.recordDelivery(job.periodKey, delivery);
-    await store.finish(job.path, "succeeded", {
-      successfulSends,
-      pdfUrl: archive.pdfUrl,
-      previewUrl: archive.previewUrl,
-      message: "Published and sent to Slack."
-    });
+    try {
+      const successfulSends = await store.recordDelivery(job.periodKey, delivery);
+      await store.finish(job.path, "succeeded", { successfulSends, message: "Sent to Slack." });
+    } catch (error) {
+      await deleteDelivery(delivery, token).catch(() => {});
+      throw error;
+    }
   } catch (error) {
-    if (posted?.messageTs) await deleteDelivery(posted, slackToken()).catch(() => {});
-    console.error(`Job ${job.path} failed during Slack delivery: ${error.message}`);
+    console.error(`Job ${job.path} failed: ${error.message}`);
     await store.finish(job.path, error.code === "MONTHLY_LIMIT" ? "rejected" : "failed", {
       message: error.message.slice(0, 300)
     });
@@ -538,10 +396,12 @@ async function finalizeMain() {
 }
 
 async function main() {
-  const mode = process.argv[2] || "prepare";
-  if (mode === "prepare") return prepareMain();
-  if (mode === "finalize") return finalizeMain();
-  throw new Error("Usage: node actions/process-slack-queue.mjs [prepare|finalize]");
+  const token = requiredEnv("SLACK_BOT_TOKEN");
+  if (!token.startsWith("xoxb-")) throw new Error("SLACK_BOT_TOKEN must be a bot token beginning with xoxb-.");
+  const store = new Firestore(parseServiceAccount());
+  const jobs = await store.queuedJobs();
+  console.log(`Found ${jobs.length} queued Slack request(s).`);
+  for (const job of jobs) await processJob(store, job, token);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -554,10 +414,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 export {
   CHANNEL_ID,
   MAX_PDF_BYTES,
-  MAX_PREVIEW_BYTES,
   MESSAGE,
-  archiveFor,
-  buildSlackPayload,
+  findMessageTs,
   fromValue,
   toValue,
   validateJob
