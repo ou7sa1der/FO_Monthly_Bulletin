@@ -2,30 +2,25 @@ name: Process Slack queue
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Offset from the start of the hour, when GitHub Actions is busiest.
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 concurrency:
-  group: fo-monthly-bulletin-publish
+  group: fo-monthly-bulletin-slack-queue
   cancel-in-progress: false
 
 jobs:
   process:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 10
     env:
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
       SLACK_CHANNEL_ID: C0AFA7FR5EZ
-      PUBLIC_SITE_BASE_URL: https://ou7sa1der.github.io/FO_Monthly_Bulletin
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -38,48 +33,5 @@ jobs:
       - name: Run queue processor tests
         run: node --test actions/process-slack-queue.test.mjs
 
-      - name: Prepare the next queue request
-        id: prepare
-        shell: bash
-        run: |
-          node actions/process-slack-queue.mjs prepare
-          if [[ -f .slack-publish-plan.json ]]; then
-            echo "has_plan=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_plan=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commit the permanent PDF and preview archive
-        if: steps.prepare.outputs.has_plan == 'true'
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- bulletins
-          if ! git diff --cached --quiet; then
-            git commit -m "Archive FO monthly bulletin"
-            git push
-          fi
-
-      - name: Build GitHub Pages artifact
-        if: steps.prepare.outputs.has_plan == 'true' || github.event_name == 'workflow_dispatch'
-        run: node actions/build-pages.mjs
-
-      - name: Configure GitHub Pages
-        if: steps.prepare.outputs.has_plan == 'true' || github.event_name == 'workflow_dispatch'
-        uses: actions/configure-pages@v5
-
-      - name: Upload GitHub Pages artifact
-        if: steps.prepare.outputs.has_plan == 'true' || github.event_name == 'workflow_dispatch'
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: _site
-
-      - name: Deploy GitHub Pages
-        if: steps.prepare.outputs.has_plan == 'true' || github.event_name == 'workflow_dispatch'
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Send the published archive to Slack
-        if: steps.prepare.outputs.has_plan == 'true'
-        run: node actions/process-slack-queue.mjs finalize
+      - name: Process queued requests
+        run: node actions/process-slack-queue.mjs
