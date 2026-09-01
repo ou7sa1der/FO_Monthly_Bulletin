@@ -5,17 +5,16 @@ import {
   getFirestore, doc, getDoc, setDoc,
   collection, getDocs, addDoc, deleteDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
 
 const TEAM_DEFAULTS = {
   foTeam: { name: "Fixture Ops Delivery", label: "Wins" },
   foSpecialists: { name: "Fixture Ops Automation / Operational Updates", label: "Big Wins" }
 };
 
-let authReady = signInAnonymously(auth).catch((err) => {
+const authReady = signInAnonymously(auth).catch((err) => {
   console.error("Anonymous sign-in failed:", err);
   alert("Could not connect — check your internet connection and try reloading.");
 });
@@ -249,7 +248,6 @@ async function loadBulletinPreview() {
     `${escapeHtml(period)}<br><small>Published: ${now.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</small>`;
 
   let hadError = false;
-
   for (const teamId of Object.keys(TEAM_DEFAULTS)) {
     const card = document.getElementById(`card-${teamId}`);
     try {
@@ -292,9 +290,11 @@ async function loadBulletinPreview() {
   }
 
   const ackCards = document.getElementById("ack-cards");
+  const acknowledgementsSection = ackCards.closest(".mockup-acknowledgements");
   try {
     const shoutSnap = await getDocs(collection(db, "bulletin", "current", "shoutouts"));
     ackCards.innerHTML = "";
+    acknowledgementsSection.classList.toggle("is-empty", shoutSnap.empty);
     const decorations = ["👏", "💜", "⭐", "🌟", "🎉"];
     let ackIndex = 0;
     shoutSnap.forEach((docSnap) => {
@@ -317,6 +317,7 @@ async function loadBulletinPreview() {
     }
   } catch (err) {
     console.error("Failed to load shoutouts:", err);
+    acknowledgementsSection.classList.remove("is-empty");
     ackCards.innerHTML = `<div class="ack-card"><p>Couldn't load shoutouts — check your connection and hit Refresh.</p></div>`;
     hadError = true;
   }
@@ -326,53 +327,169 @@ async function loadBulletinPreview() {
 
 document.getElementById("refresh-btn").addEventListener("click", loadBulletinPreview);
 
-document.getElementById("generate-btn").addEventListener("click", async () => {
-  const statusEl = document.getElementById("bulletin-status");
-  statusEl.textContent = "Generating PDF…";
+async function createBulletinPdf() {
   const node = document.getElementById("bulletin-template");
+  node.classList.add("pdf-rendering");
+  let canvas;
   try {
-    // windowWidth forces html2canvas to lay out the template as if the browser
-    // were 1400px wide, ignoring the template's `max-width: 100%` and whatever
-    // the admin's actual window size happens to be. scale: 1 keeps the source
-    // at real screen resolution (1400x~1347px, ~1.9 megapixels) — higher scale
-    // values (tested 2/3/4x) render a clean, uncorrupted canvas on this end,
-    // but the resulting PDF glitches into visual noise when previewed (Slack's
-    // in-app PDF viewer is exactly this kind of lightweight renderer that
-    // chokes on a single very large embedded image). Since scale:1 is already
-    // fully lossless PNG (zero compression artifacts, confirmed separately),
-    // the extra sharpness from supersampling isn't worth risking broken
-    // previews for what you'll actually do with this file.
-    const canvas = await html2canvas(node, {
+    // Give the browser one frame to reflow after hiding an empty
+    // acknowledgements section, then capture the shorter bulletin.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    canvas = await html2canvas(node, {
       scale: 1,
       backgroundColor: "#ffffff",
       windowWidth: 1400,
       width: 1400
     });
-    // PNG, not JPEG — JPEG (even at quality 1.0) has inherent chroma-subsampling
-    // softness around sharp edges (text, icons) that quality alone can't remove.
-    // Embedding a PNG via jsPDF's addImage without the `compress` option bloats
-    // the file to several MB (tested) because jsPDF re-encodes the pixel data
-    // inefficiently regardless of input compression — but enabling `compress`
-    // (Flate-compresses the PDF's internal streams) brings that same lossless
-    // PNG down to ~0.2MB, nowhere near Slack's 10MB cap, with zero compression
-    // artifacts. One PDF page sized exactly to the image, so the whole page is
-    // the bulletin with no extra margins.
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({
-      orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
-      unit: "px",
-      format: [canvas.width, canvas.height],
-      compress: true
-    });
-    pdf.addImage(canvas, "PNG", 0, 0, canvas.width, canvas.height);
-    pdf.setDisplayMode("50%", "continuous", "UseNone");
-    pdf.save(`fo-monthly-bulletin-${new Date().toISOString().slice(0, 7)}.pdf`);
+  } finally {
+    node.classList.remove("pdf-rendering");
+  }
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({
+    orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
+    unit: "px",
+    format: [canvas.width, canvas.height],
+    compress: true
+  });
+  pdf.addImage(canvas, "PNG", 0, 0, canvas.width, canvas.height);
+  pdf.setDisplayMode("50%", "continuous", "UseNone");
+  return pdf;
+}
+
+function getBulletinPeriod() {
+  const now = new Date();
+  const label = document.getElementById("period-override").value.trim() ||
+    now.toLocaleString("en-US", { month: "long", year: "numeric" });
+  const parsed = new Date(`${label} 1`);
+  const date = Number.isNaN(parsed.getTime()) ? now : parsed;
+  const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return { label, key, filename: `fo-monthly-bulletin-${key}.pdf` };
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+document.getElementById("generate-btn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("bulletin-status");
+  statusEl.textContent = "Generating PDF…";
+  try {
+    const period = getBulletinPeriod();
+    const pdf = await createBulletinPdf();
+    pdf.save(period.filename);
     statusEl.textContent = "Downloaded ✅";
   } catch (err) {
     console.error(err);
     statusEl.textContent = "Generation failed — see console for details.";
   }
   setTimeout(() => (statusEl.textContent = ""), 4000);
+});
+
+const sendSlackBtn = document.getElementById("send-slack-btn");
+const deleteSlackBtn = document.getElementById("delete-slack-btn");
+const slackStatusEl = document.getElementById("slack-status");
+const MAX_QUEUED_PDF_BYTES = 650 * 1024;
+
+function setSlackControlsBusy(busy, action = "") {
+  sendSlackBtn.disabled = busy;
+  deleteSlackBtn.disabled = busy;
+  sendSlackBtn.textContent = busy && action === "send" ? "Queued for Slack…" : "Send to Slack";
+  deleteSlackBtn.textContent = busy && action === "delete" ? "Delete queued…" : "Delete last Slack post";
+}
+
+async function queueSlackJob(payload) {
+  await authReady;
+  const user = auth.currentUser;
+  if (!user) throw new Error("Anonymous Firebase sign-in is not ready. Reload the page and try again.");
+  return addDoc(collection(db, "bulletin", "current", "slackQueue"), {
+    ...payload,
+    requestedBy: user.uid,
+    status: "queued",
+    createdAt: serverTimestamp()
+  });
+}
+
+async function waitForSlackJob(jobRef, action) {
+  // The scheduled workflow normally starts within five minutes. If the page is
+  // closed, the queued job still continues in GitHub Actions.
+  for (let attempt = 0; attempt < 120; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const snapshot = await getDoc(jobRef);
+    if (!snapshot.exists()) throw new Error("The queued Slack request could not be found.");
+    const job = snapshot.data();
+    if (job.status === "succeeded") {
+      return action === "send"
+        ? `Sent to Slack ✅ (${job.successfulSends}/3)`
+        : "Last Slack post deleted ✅";
+    }
+    if (job.status === "rejected" || job.status === "failed") {
+      throw new Error(job.message || "The Slack request failed.");
+    }
+    slackStatusEl.textContent = job.status === "processing"
+      ? "GitHub Actions is processing the request…"
+      : "Queued — GitHub Actions checks every 5 minutes…";
+  }
+  return "Still queued — it will continue even if you close this page.";
+}
+
+sendSlackBtn.addEventListener("click", async () => {
+  const period = getBulletinPeriod();
+  if (!confirm(`Send ${period.label} bulletin and its generated PDF to Slack?`)) return;
+
+  setSlackControlsBusy(true, "send");
+  sendSlackBtn.textContent = "Preparing PDF…";
+  slackStatusEl.textContent = "Generating PDF…";
+  try {
+    const pdf = await createBulletinPdf();
+    const pdfBlob = pdf.output("blob");
+    if (pdfBlob.size > MAX_QUEUED_PDF_BYTES) {
+      throw new Error(`The generated PDF is ${(pdfBlob.size / 1024).toFixed(0)} KB; the Firestore queue limit is 650 KB.`);
+    }
+    slackStatusEl.textContent = "Adding the request to the secure queue…";
+    const jobRef = await queueSlackJob({
+      action: "send",
+      periodKey: period.key,
+      periodLabel: period.label,
+      filename: period.filename,
+      pdfBytes: pdfBlob.size,
+      pdfBase64: await blobToBase64(pdfBlob)
+    });
+    setSlackControlsBusy(true, "send");
+    slackStatusEl.textContent = "Queued — GitHub Actions checks every 5 minutes…";
+    slackStatusEl.textContent = await waitForSlackJob(jobRef, "send");
+  } catch (err) {
+    console.error(err);
+    slackStatusEl.textContent = `Slack send failed: ${err.message}`;
+  } finally {
+    setSlackControlsBusy(false);
+  }
+});
+
+deleteSlackBtn.addEventListener("click", async () => {
+  const period = getBulletinPeriod();
+  if (!confirm(`Delete the latest Slack post for ${period.label}? This does not restore one of the 3 monthly sends.`)) return;
+
+  setSlackControlsBusy(true, "delete");
+  slackStatusEl.textContent = "Adding the delete request to the secure queue…";
+  try {
+    const jobRef = await queueSlackJob({
+      action: "delete",
+      periodKey: period.key,
+      periodLabel: period.label
+    });
+    slackStatusEl.textContent = "Queued — GitHub Actions checks every 5 minutes…";
+    slackStatusEl.textContent = await waitForSlackJob(jobRef, "delete");
+  } catch (err) {
+    console.error(err);
+    slackStatusEl.textContent = `Slack delete failed: ${err.message}`;
+  } finally {
+    setSlackControlsBusy(false);
+  }
 });
 
 document.getElementById("clear-btn").addEventListener("click", async () => {
@@ -418,6 +535,7 @@ if (viewMode === "submit") {
   document.getElementById("tab-bulletin").classList.add("active");
   document.getElementById("generate-btn").style.display = "none";
   document.getElementById("clear-btn").style.display = "none";
+  document.querySelector(".slack-controls").style.display = "none";
   document.querySelector(".period-label").style.display = "none";
   loadBulletinPreview();
 }

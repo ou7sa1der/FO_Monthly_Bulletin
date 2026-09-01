@@ -177,6 +177,42 @@ main { margin: 24px auto; padding: 0 16px 60px; }
 #generate-btn { background: #3c34c1; color: #fff; border-color: #3c34c1; }
 .danger { background: #fbe8e8; color: #a12b2b; border-color: #f3c8c8; }
 
+.slack-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: -8px 0 24px;
+  flex-wrap: wrap;
+}
+
+.slack-controls button {
+  padding: 11px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#send-slack-btn {
+  background: #17864b;
+  color: #fff;
+  border: 1px solid #17864b;
+}
+
+#delete-slack-btn {
+  background: #b42318;
+  color: #fff;
+  border: 1px solid #b42318;
+}
+
+.slack-controls button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+#slack-status { font-size: 13px; color: #555; }
+
 .period-label {
   display: flex; flex-direction: column; font-size: 12px; color: #666; gap: 2px;
 }
@@ -306,6 +342,12 @@ main { margin: 24px auto; padding: 0 16px 60px; }
   border-radius: 16px;
   padding: 28px;
   margin-bottom: 28px;
+}
+
+/* Keep the empty-state visible in the web preview, but omit the entire
+   section from both downloaded and Slack-bound PDFs. */
+.bulletin-mockup.pdf-rendering .mockup-acknowledgements.is-empty {
+  display: none;
 }
 
 .ack-header { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 20px; }

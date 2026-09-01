@@ -1,10 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     match /bulletin/current/teams/{teamId} {
       allow read: if true;
-
       allow write: if request.auth != null
         && teamId in ['foTeam', 'foSpecialists']
         && request.resource.data.keys().hasOnly(['name', 'subtitle', 'wins', 'upcoming'])
@@ -18,7 +16,6 @@ service cloud.firestore {
 
     match /bulletin/current/kpis/{kpiDocId} {
       allow read: if true;
-
       allow write: if request.auth != null
         && kpiDocId == 'values'
         && request.resource.data.keys().hasOnly(['correctFixtures', 'tier1Sla', 'tier2Sla', 'tier35Sla'])
@@ -30,7 +27,6 @@ service cloud.firestore {
         && request.resource.data.tier2Sla >= 0 && request.resource.data.tier2Sla <= 100
         && request.resource.data.tier35Sla is number
         && request.resource.data.tier35Sla >= 0 && request.resource.data.tier35Sla <= 100;
-
       allow write: if request.auth != null
         && kpiDocId == 'faValues'
         && request.resource.data.keys().hasOnly(['workingTimeUtilisation', 'responseTimeNewRequests', 'resolutionTimeOldRequests', 'qualityOfStatements'])
@@ -42,20 +38,62 @@ service cloud.firestore {
         && request.resource.data.resolutionTimeOldRequests >= 0 && request.resource.data.resolutionTimeOldRequests <= 100
         && request.resource.data.qualityOfStatements is number
         && request.resource.data.qualityOfStatements >= 0 && request.resource.data.qualityOfStatements <= 100;
-
       allow delete: if request.auth != null;
     }
 
     match /bulletin/current/shoutouts/{shoutoutId} {
       allow read: if true;
-
       allow create: if request.auth != null
         && request.resource.data.keys().hasOnly(['name', 'description', 'createdAt'])
         && request.resource.data.name is string
         && request.resource.data.description is string;
-
       allow delete: if request.auth != null;
       allow update: if false;
+    }
+
+    // A signed-in anonymous visitor may only create an immutable, tightly
+    // validated queue item. GitHub Actions uses a Firebase service account to
+    // claim and update jobs, so the Slack token never reaches this website.
+    match /bulletin/current/slackQueue/{jobId} {
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+          'action', 'periodKey', 'periodLabel', 'filename', 'pdfBytes',
+          'pdfBase64', 'requestedBy', 'status', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'action', 'periodKey', 'periodLabel', 'requestedBy', 'status', 'createdAt'
+        ])
+        && request.resource.data.action in ['send', 'delete']
+        && request.resource.data.periodKey is string
+        && request.resource.data.periodKey.matches('^\\d{4}-(0[1-9]|1[0-2])$')
+        && request.resource.data.periodLabel is string
+        && request.resource.data.periodLabel.size() > 0
+        && request.resource.data.periodLabel.size() <= 40
+        && request.resource.data.requestedBy == request.auth.uid
+        && request.resource.data.status == 'queued'
+        && request.resource.data.createdAt == request.time
+        && (
+          (request.resource.data.action == 'send'
+            && request.resource.data.keys().hasAll(['filename', 'pdfBytes', 'pdfBase64'])
+            && request.resource.data.filename is string
+            && request.resource.data.filename.matches('^fo-monthly-bulletin-\\d{4}-(0[1-9]|1[0-2])\\.pdf$')
+            && request.resource.data.pdfBytes is int
+            && request.resource.data.pdfBytes > 0
+            && request.resource.data.pdfBytes <= 665600
+            && request.resource.data.pdfBase64 is string
+            && request.resource.data.pdfBase64.size() <= 887468)
+          ||
+          (request.resource.data.action == 'delete'
+            && !request.resource.data.keys().hasAny(['filename', 'pdfBytes', 'pdfBase64']))
+        );
+      allow read: if request.auth != null
+        && resource.data.requestedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Counters and Slack delivery identifiers are server-only.
+    match /bulletin/current/slackPeriods/{document=**} {
+      allow read, write: if false;
     }
 
     match /{document=**} {

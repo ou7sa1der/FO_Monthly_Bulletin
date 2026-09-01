@@ -1,73 +1,88 @@
 # FO Monthly Bulletin
 
-A static site that is both the submission form and the picture generator for the FO Monthly Bulletin. No backend server — Firebase (Firestore + Anonymous Auth) is the shared store, GitHub Pages hosts the static files, and Slack Workflow Builder sends the reminders.
+Static GitHub Pages site for collecting Fixture Operations updates, previewing the monthly bulletin, generating its PDF, and queueing Slack delivery without exposing the Slack bot token.
+
+## Architecture
+
+The existing site remains public and requires no visible login. Firebase Anonymous Authentication signs the browser in silently so Firestore Security Rules can validate writes.
+
+Slack operations use this flow:
+
+1. `Send to Slack` generates the same PDF as `Generate PDF`.
+2. The browser writes a tightly validated request to `bulletin/current/slackQueue` in Firestore.
+3. `.github/workflows/process-slack-queue.yml` checks the queue every five minutes.
+4. The workflow reads the Slack token and Firebase service account from GitHub Actions Secrets.
+5. The workflow sends the fixed message and PDF to channel `C0AFA7FR5EZ`, then records the result in Firestore.
+
+The Slack token and Firebase private key never appear in the website, `firebase-config.js`, Firestore, or committed source files.
+
+## Slack behavior
+
+- The destination channel is fixed in the workflow as `C0AFA7FR5EZ`.
+- The exact generated PDF is queued; it is not regenerated later.
+- When there are no acknowledgements, that entire section remains visible as an empty state on the website but is omitted from generated PDFs.
+- Firestore documents have a 1 MiB limit, so the generated PDF is capped at 650 KiB. The normal bulletin PDF is expected to be around 200 KiB.
+- Up to three successful sends are allowed per bulletin month. Failed attempts do not count.
+- `Delete last Slack post` removes the latest undeleted bot post and PDF for the selected bulletin month.
+- Deleting does not reduce the successful-send counter.
+- Both operations ask for confirmation and disable both Slack buttons while the request is being watched.
+- Closing the page does not cancel an already queued request.
+
+The Slack app must be a member of the test channel and have these Bot Token Scopes:
+
+- `files:write` — upload and delete the PDF.
+- `files:read` — find the Slack message timestamp associated with the uploaded PDF.
+- `chat:write` — delete the bot's own message.
+
+After changing scopes, reinstall the Slack app to the workspace so the bot token receives them.
 
 ## One-time setup
 
-Firebase's console has reorganized its sidebar recently — these steps match the current layout (2026), not older tutorials/screenshots you might find elsewhere, which may say "Build →" where this says "Databases & Storage →" or "Security →".
+### 1. Firebase
 
-### 1. Create the Firebase project
-1. Go to https://console.firebase.google.com, sign in with any Google account, click **Add project**.
-2. Name it (e.g. `fo-bulletin`), skip Google Analytics, click **Create project**.
+The existing Firebase project is `fo-bulletin`.
 
-### 2. Enable Firestore
-1. In the left sidebar: **Databases & Storage → Firestore → Create database**.
-2. When asked to pick an edition, choose **Standard edition** — this is the one with the free Spark-plan quota (1 GB storage, 50,000 reads/day, 20,000 writes/day, 20,000 deletes/day). Enterprise edition uses different, non-free billing — don't pick that one.
-3. Pick any region close to you, start in **production mode** (we're pasting our own rules next, so the "test mode" default doesn't matter).
+1. Keep Firestore and Anonymous Authentication enabled.
+2. In Firebase Console, open **Firestore Database → Rules**.
+3. Replace the published rules with [`firestore.rules`](./firestore.rules) and click **Publish**.
+4. Open **Project settings → Service accounts** and generate a private key for a service account that can read and write this project's Firestore database.
+5. Keep the downloaded JSON private. Do not copy it into this repository or send it in chat.
 
-### 3. Enable Anonymous Authentication
-1. In the left sidebar: **Security → Authentication → Get started → Sign-in method** tab.
-2. Click **Anonymous**, toggle it **Enable**, **Save**.
+The Firebase values in `firebase-config.js` are public web identifiers. Firestore Security Rules control browser access.
+The included `.gitignore` also blocks common service-account filename patterns, but the JSON should still be kept outside the project folder.
 
-### 4. Deploy the security rules
-1. In the left sidebar: **Databases & Storage → Firestore → Rules** tab.
-2. Delete the placeholder content and paste in the contents of [`firestore.rules`](./firestore.rules) from this repo.
-3. Click **Publish**.
+### 2. GitHub Actions Secrets
 
-### 5. Register a Web app and get your config
-1. Click the gear icon (top left, next to "Project Overview") → **Project settings**.
-2. Scroll to **Your apps** → click the **`</>`** (Web) icon.
-3. Give it any nickname, click **Register app** (no need to check "Also set up Firebase Hosting" — we're using GitHub Pages instead).
-4. Copy the `firebaseConfig` object it shows you.
-5. Open [`firebase-config.js`](./firebase-config.js) in this project and paste your real values in place of the `PASTE_..._HERE` placeholders.
+In the GitHub repository open **Settings → Secrets and variables → Actions → New repository secret** and create:
 
-These values aren't secret — they just tell the page which Firebase project to talk to. Real access control lives entirely in `firestore.rules`, not in hiding this file.
+- `SLACK_BOT_TOKEN` — the complete `xoxb-...` bot token.
+- `FIREBASE_SERVICE_ACCOUNT_JSON` — the complete contents of the downloaded Firebase service-account JSON file.
 
-### Quick sanity check once you're done
-Open the page locally (see below), open the browser's developer console (F12), and reload. You should see no `auth/api-key-not-valid` or `client is offline` errors — if you still see those, double-check `firebase-config.js` has your real values (not the `PASTE_..._HERE` placeholders) and that you completed steps 2–3 above.
+Do not add quotation marks around the Slack token. Paste the service-account JSON as the secret value, not as a repository file.
 
-## Running it locally to test
+### 3. Publish the files
 
-Any static file server works. From this folder:
+Push the changed files to the repository's default branch. GitHub Pages continues to deploy from the configured branch, and the scheduled workflow runs from the default branch.
 
-```bash
-npx serve .
-```
+The workflow can also be tested immediately from **Actions → Process Slack queue → Run workflow**. Scheduled GitHub Actions runs can occasionally start later than five minutes.
 
-Then open the printed local URL in your browser.
+## Using the site
 
-## Publishing to GitHub Pages
+- Normal URL — full submission and bulletin controls.
+- `?mode=view` — read-only bulletin display with Slack/admin controls hidden.
+- `?mode=submit` — submission form only.
 
-1. Push this folder's contents to a GitHub repo.
-2. Repo → **Settings → Pages** → Source: **Deploy from a branch** → pick your branch and `/ (root)`.
-3. The resulting URL is `https://<username>.github.io/<repo>/` — see "Which link goes to whom" below for what to actually share.
+On the Bulletin tab:
 
-## Which link goes to whom
+- `Generate PDF` downloads the monthly PDF locally.
+- `Send to Slack` confirms, generates the PDF, and queues it for Slack.
+- `Delete last Slack post` confirms and queues deletion of the latest bot delivery for that month.
+- `Clear Fields` keeps its existing behavior.
 
-The same page supports three modes via a URL query parameter — this is a UI convenience, not real access control (no login exists to enforce it, so anyone technical could still reach the same data another way):
+## Main files
 
-- **`https://.../` (no parameter)** — full access: both tabs, Generate, Clear. **Send this to your managers** — decided against restricting them, they get everything.
-- **`https://.../?mode=view`** — read-only, auto-loading Bulletin display only, no tabs or admin buttons. Optional — only use this if you want to share a "just look, don't touch" link with someone outside the two managers.
-- **`https://.../?mode=submit`** — Submit tab only, no Bulletin access. Built but currently unused — the decision was to give managers full access instead. Kept in the code in case that changes later.
-
-## Generating the monthly picture
-
-The Bulletin tab's **Generate** button produces a **PDF** (not PNG) — decided this way because the file is posted as a channel attachment, not embedded in a Slack Canvas, and PDF previews well there. Each cycle: generate, download, post it to the channel — this creates a permanent archive of that month's bulletin, which a live link wouldn't (a shared link always shows *current* data, so it would show next month's content once Clear Fields runs — the PDF is what stays historically accurate).
-
-## What each file is
-
-- `index.html` — the whole app: Submit tab (per-team forms) and Bulletin tab (preview + Generate/Clear)
-- `style.css` — styling, including the mockup-matched bulletin template
-- `app.js` — Firebase wiring, dynamic add/remove lists, save/load/clear, view-mode logic, and the Generate-to-PDF logic
-- `firebase-config.js` — your project's connection details (fill this in, see step 5 above)
-- `firestore.rules` — the only thing that actually restricts who can write what
+- `index.html`, `style.css`, `app.js` — static UI, Firebase data flow, PDF generation, and Slack queue controls.
+- `firebase-config.js` — public Firebase web configuration.
+- `firestore.rules` — validation for bulletin data and immutable Slack queue requests.
+- `.github/workflows/process-slack-queue.yml` — five-minute scheduler.
+- `actions/process-slack-queue.mjs` — server-side Firestore and Slack processing; uses Node.js built-ins only.

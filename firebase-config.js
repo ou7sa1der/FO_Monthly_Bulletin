@@ -1,8 +1,5 @@
-// Paste the config object Firebase gives you when you register a Web app
-// (Firebase console → Project settings → Your apps → </> Web app).
-// These values are not secret — they identify the project, not grant access.
-// Access is controlled entirely by firestore.rules, not by hiding this file.
-
+// Firebase web configuration is public by design. Access is enforced by
+// Firestore Security Rules, not by hiding these values.
 export const firebaseConfig = {
   apiKey: "AIzaSyDakTMFSNqUhf61tasLSqB85NdroryGi3s",
   authDomain: "fo-bulletin.firebaseapp.com",

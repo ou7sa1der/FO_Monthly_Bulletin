@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Fixture Ops Monthly Bulletin</title>
-<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="style.css?v=20260901-2" />
 </head>
 <body>
 
@@ -139,12 +139,17 @@
       <button type="button" id="clear-btn" class="danger">Clear Fields</button>
       <span id="bulletin-status"></span>
     </div>
+    <div class="slack-controls">
+      <button type="button" id="send-slack-btn">Send to Slack</button>
+      <button type="button" id="delete-slack-btn">Delete last Slack post</button>
+      <span id="slack-status" aria-live="polite"></span>
+    </div>
   </section>
 
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=20260901-2"></script>
 </body>
 </html>
