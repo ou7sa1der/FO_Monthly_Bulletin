@@ -374,15 +374,6 @@ function getBulletinPeriod() {
   return { label, key, filename: `fo-monthly-bulletin-${key}.pdf` };
 }
 
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1]);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
 document.getElementById("generate-btn").addEventListener("click", async () => {
   const statusEl = document.getElementById("bulletin-status");
   statusEl.textContent = "Generating PDF…";
@@ -401,88 +392,94 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
 const sendSlackBtn = document.getElementById("send-slack-btn");
 const deleteSlackBtn = document.getElementById("delete-slack-btn");
 const slackStatusEl = document.getElementById("slack-status");
-const MAX_QUEUED_PDF_BYTES = 650 * 1024;
+const SLACK_WORKER_URL = "https://fo-monthly-bulletin-slack.kasparian6.workers.dev/";
+const TURNSTILE_SITE_KEY = "0x4AAAAAAEkp-UpXZa3HM01Q";
+const MAX_SLACK_PDF_BYTES = 5 * 1024 * 1024;
+let turnstileWidgetId = null;
+let turnstileWaiter = null;
 
-function activeSlackJobKey(action, periodKey) {
-  return `fo-monthly-bulletin:slack-job:${action}:${periodKey}`;
+function waitForTurnstileApi(timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (window.turnstile) {
+        resolve(window.turnstile);
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error("The security check could not load. Refresh the page and try again."));
+      } else {
+        setTimeout(check, 50);
+      }
+    };
+    check();
+  });
 }
 
-function clearActiveSlackJob(action, periodKey) {
-  localStorage.removeItem(activeSlackJobKey(action, periodKey));
+function settleTurnstile(error, token = "") {
+  if (!turnstileWaiter) return;
+  const waiter = turnstileWaiter;
+  turnstileWaiter = null;
+  clearTimeout(waiter.timeoutId);
+  if (error) waiter.reject(error);
+  else waiter.resolve(token);
 }
 
-async function getActiveSlackJob(action, periodKey) {
-  await authReady;
-  const path = localStorage.getItem(activeSlackJobKey(action, periodKey));
-  if (!path) return null;
+async function getTurnstileToken() {
+  if (turnstileWaiter) throw new Error("A security check is already in progress.");
+  const turnstile = await waitForTurnstileApi();
+
+  const tokenPromise = new Promise((resolve, reject) => {
+    turnstileWaiter = {
+      resolve,
+      reject,
+      timeoutId: setTimeout(() => {
+        settleTurnstile(new Error("The security check timed out. Please try again."));
+      }, 120000)
+    };
+  });
 
   try {
-    const jobRef = doc(db, path);
-    const snapshot = await getDoc(jobRef);
-    const job = snapshot.data();
-    if (snapshot.exists()
-      && job.requestedBy === auth.currentUser?.uid
-      && ["queued", "processing"].includes(job.status)) {
-      return jobRef;
+    if (turnstileWidgetId === null) {
+      turnstileWidgetId = turnstile.render("#slack-turnstile", {
+        sitekey: TURNSTILE_SITE_KEY,
+        action: "slack_request",
+        execution: "execute",
+        appearance: "interaction-only",
+        callback: (token) => settleTurnstile(null, token),
+        "error-callback": () => settleTurnstile(new Error("The security check failed. Please try again.")),
+        "expired-callback": () => settleTurnstile(new Error("The security check expired. Please try again.")),
+        "timeout-callback": () => settleTurnstile(new Error("The security check timed out. Please try again."))
+      });
+    } else {
+      turnstile.reset(turnstileWidgetId);
     }
+    turnstile.execute(turnstileWidgetId);
   } catch (error) {
-    console.warn("Could not resume the existing Slack request:", error);
+    settleTurnstile(error);
   }
 
-  clearActiveSlackJob(action, periodKey);
-  return null;
+  return tokenPromise;
+}
+
+async function callSlackWorker(path, turnstileToken, requestOptions) {
+  const response = await fetch(new URL(path, SLACK_WORKER_URL), {
+    ...requestOptions,
+    headers: {
+      ...requestOptions.headers,
+      "X-Turnstile-Token": turnstileToken
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || `The Slack service returned HTTP ${response.status}.`);
+  }
+  return data;
 }
 
 function setSlackControlsBusy(busy, action = "") {
   sendSlackBtn.disabled = busy;
   deleteSlackBtn.disabled = busy;
-  sendSlackBtn.textContent = busy && action === "send" ? "Queued for Slack…" : "Send to Slack";
-  deleteSlackBtn.textContent = busy && action === "delete" ? "Delete queued…" : "Delete last Slack post";
-}
-
-async function queueSlackJob(payload) {
-  await authReady;
-  const user = auth.currentUser;
-  if (!user) throw new Error("Anonymous Firebase sign-in is not ready. Reload the page and try again.");
-  const jobRef = await addDoc(collection(db, "bulletin", "current", "slackQueue"), {
-    ...payload,
-    requestedBy: user.uid,
-    status: "queued",
-    createdAt: serverTimestamp()
-  });
-  localStorage.setItem(activeSlackJobKey(payload.action, payload.periodKey), jobRef.path);
-  return jobRef;
-}
-
-async function waitForSlackJob(jobRef, action, periodKey) {
-  // The queued job continues even when the page is closed. GitHub's scheduled
-  // trigger is best effort, so a repository owner can run the workflow manually
-  // when immediate processing is needed.
-  for (let attempt = 0; attempt < 120; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    const snapshot = await getDoc(jobRef);
-    if (!snapshot.exists()) {
-      clearActiveSlackJob(action, periodKey);
-      throw new Error("The queued Slack request could not be found.");
-    }
-    const job = snapshot.data();
-    if (job.status === "succeeded") {
-      clearActiveSlackJob(action, periodKey);
-      return action === "send"
-        ? `Sent to Slack ✅ (${job.successfulSends}/3)`
-        : "Last Slack post deleted ✅";
-    }
-    if (job.status === "rejected" || job.status === "failed") {
-      clearActiveSlackJob(action, periodKey);
-      throw new Error(job.message || "The Slack request failed.");
-    }
-    if (job.status === "processing") {
-      slackStatusEl.textContent = "GitHub Actions is processing the request…";
-    } else {
-      slackStatusEl.textContent = "Queued — waiting for GitHub Actions…";
-    }
-  }
-  return "Still queued — GitHub's schedule is delayed; the request remains saved.";
+  sendSlackBtn.textContent = busy && action === "send" ? "Sending to Slack…" : "Send to Slack";
+  deleteSlackBtn.textContent = busy && action === "delete" ? "Deleting…" : "Delete last Slack post";
 }
 
 sendSlackBtn.addEventListener("click", async () => {
@@ -492,31 +489,25 @@ sendSlackBtn.addEventListener("click", async () => {
   setSlackControlsBusy(true, "send");
   sendSlackBtn.textContent = "Preparing PDF…";
   try {
-    const existingJob = await getActiveSlackJob("send", period.key);
-    if (existingJob) {
-      slackStatusEl.textContent = "Resuming the existing queued Slack request…";
-      slackStatusEl.textContent = await waitForSlackJob(existingJob, "send", period.key);
-      return;
-    }
-
     slackStatusEl.textContent = "Generating PDF…";
     const pdf = await createBulletinPdf();
     const pdfBlob = pdf.output("blob");
-    if (pdfBlob.size > MAX_QUEUED_PDF_BYTES) {
-      throw new Error(`The generated PDF is ${(pdfBlob.size / 1024).toFixed(0)} KB; the Slack queue limit is 650 KB.`);
+    if (pdfBlob.size > MAX_SLACK_PDF_BYTES) {
+      throw new Error(`The generated PDF is ${(pdfBlob.size / 1024 / 1024).toFixed(1)} MB; the Slack limit is 5 MB.`);
     }
-    slackStatusEl.textContent = "Adding the request to the secure queue…";
-    const jobRef = await queueSlackJob({
-      action: "send",
-      periodKey: period.key,
-      periodLabel: period.label,
-      filename: period.filename,
-      pdfBytes: pdfBlob.size,
-      pdfBase64: await blobToBase64(pdfBlob)
+    slackStatusEl.textContent = "Completing security check…";
+    const turnstileToken = await getTurnstileToken();
+    slackStatusEl.textContent = "Sending PDF directly to Slack…";
+    const url = new URL("send", SLACK_WORKER_URL);
+    url.searchParams.set("periodKey", period.key);
+    url.searchParams.set("periodLabel", period.label);
+    url.searchParams.set("filename", period.filename);
+    const result = await callSlackWorker(url.toString(), turnstileToken, {
+      method: "POST",
+      headers: { "Content-Type": "application/pdf" },
+      body: pdfBlob
     });
-    setSlackControlsBusy(true, "send");
-    slackStatusEl.textContent = "Queued — waiting for GitHub Actions…";
-    slackStatusEl.textContent = await waitForSlackJob(jobRef, "send", period.key);
+    slackStatusEl.textContent = `Sent to Slack ✅ (${result.successfulSends}/3)`;
   } catch (err) {
     console.error(err);
     slackStatusEl.textContent = `Slack send failed: ${err.message}`;
@@ -531,21 +522,15 @@ deleteSlackBtn.addEventListener("click", async () => {
 
   setSlackControlsBusy(true, "delete");
   try {
-    const existingJob = await getActiveSlackJob("delete", period.key);
-    if (existingJob) {
-      slackStatusEl.textContent = "Resuming the existing queued delete request…";
-      slackStatusEl.textContent = await waitForSlackJob(existingJob, "delete", period.key);
-      return;
-    }
-
-    slackStatusEl.textContent = "Adding the delete request to the secure queue…";
-    const jobRef = await queueSlackJob({
-      action: "delete",
-      periodKey: period.key,
-      periodLabel: period.label
+    slackStatusEl.textContent = "Completing security check…";
+    const turnstileToken = await getTurnstileToken();
+    slackStatusEl.textContent = "Deleting the latest Slack post…";
+    await callSlackWorker("delete-last", turnstileToken, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ periodKey: period.key, periodLabel: period.label })
     });
-    slackStatusEl.textContent = "Queued — waiting for GitHub Actions…";
-    slackStatusEl.textContent = await waitForSlackJob(jobRef, "delete", period.key);
+    slackStatusEl.textContent = "Last Slack post deleted ✅";
   } catch (err) {
     console.error(err);
     slackStatusEl.textContent = `Slack delete failed: ${err.message}`;

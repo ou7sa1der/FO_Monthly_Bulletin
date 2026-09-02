@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Fixture Ops Monthly Bulletin</title>
-<link rel="stylesheet" href="style.css?v=20260901-2" />
+<link rel="stylesheet" href="style.css?v=20260902-1" />
 </head>
 <body>
 
@@ -142,6 +142,7 @@
     <div class="slack-controls">
       <button type="button" id="send-slack-btn">Send to Slack</button>
       <button type="button" id="delete-slack-btn">Delete last Slack post</button>
+      <div id="slack-turnstile" class="slack-turnstile"></div>
       <span id="slack-status" aria-live="polite"></span>
     </div>
   </section>
@@ -150,6 +151,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script type="module" src="app.js?v=20260901-5"></script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+<script type="module" src="app.js?v=20260902-1"></script>
 </body>
 </html>

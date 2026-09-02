@@ -1,66 +1,54 @@
 # FO Monthly Bulletin
 
-Static GitHub Pages site for collecting Fixture Operations updates, previewing the monthly bulletin, generating its PDF, and queueing direct Slack delivery without exposing the Slack bot token.
+Public GitHub Pages single-page app for collecting Fixture Operations updates, previewing the monthly bulletin, generating its PDF, and sending it directly to Slack.
 
 ## Architecture
 
-The site remains public and requires no visible login. Firebase Anonymous Authentication signs the browser in silently so Firestore Security Rules can validate writes.
+- GitHub Pages hosts the public vanilla JavaScript frontend.
+- Firebase Anonymous Authentication and Firestore keep the existing bulletin data flow.
+- Cloudflare Turnstile protects the two public Slack controls from automated abuse.
+- The browser sends the generated PDF directly to the Cloudflare Worker.
+- The Worker reads the Slack bot token from an encrypted Cloudflare Secret, uploads the PDF to the fixed Slack channel, and uses D1 for the monthly counter and delivery history.
 
-Slack operations use this flow:
-
-1. `Send to Slack` generates the same PDF as `Generate PDF`.
-2. The browser writes a tightly validated request to `bulletin/current/slackQueue` in Firestore.
-3. `.github/workflows/process-slack-queue.yml` checks the queue approximately every five minutes.
-4. The workflow reads the Slack token and Firebase service account from GitHub Actions Secrets.
-5. The workflow uploads the PDF directly to Slack with the fixed message in channel `C0AFA7FR5EZ`, then records the result in Firestore.
-
-The Slack token and Firebase private key never appear in the website, `firebase-config.js`, Firestore, or committed source files.
+The Slack bot token is never present in GitHub, Firebase, HTML, JavaScript, or the generated PDF.
 
 ## Slack behavior
 
-- The destination channel is fixed as `C0AFA7FR5EZ` while testing.
-- The exact generated PDF is queued and uploaded directly to Slack; it is not published through GitHub Pages.
-- When there are no acknowledgements, the section remains visible as an empty state on the website but is omitted from generated PDFs.
-- Firestore documents have a 1 MiB limit, so the PDF is capped at 650 KiB. A normal bulletin is expected to be around 200 KiB.
+- Worker: `https://fo-monthly-bulletin-slack.kasparian6.workers.dev`
+- Test channel: `C0AFA7FR5EZ`
+- `Send to Slack` asks for confirmation, creates the same PDF as `Generate PDF`, completes Turnstile verification, and uploads it immediately.
+- The Slack post contains the fixed Fixtures Operations announcement followed by the PDF attachment and Slack preview.
 - Up to three successful sends are allowed per bulletin month. Failed attempts do not count.
-- `Delete last Slack post` removes the latest undeleted bot message and PDF for the selected month.
+- `Delete last Slack post` immediately removes the latest undeleted bot message and PDF for the selected month.
 - Deleting does not reduce the successful-send counter.
-- Both operations ask for confirmation and temporarily disable both Slack buttons.
-- Closing the page does not cancel an already queued request.
+- Both buttons stay disabled while their request is running, preventing accidental double clicks.
+- The maximum PDF size is 5 MB. A normal bulletin is expected to be much smaller.
+- When there are no acknowledgements, the section remains visible as an empty state on the website but is omitted from generated PDFs.
 
 The Slack app must be a member of the test channel and have these Bot Token Scopes:
 
-- `chat:write` — post and delete the bot's own message.
-- `files:write` — upload and delete the PDF.
-- `files:read` — find the Slack message timestamp associated with the uploaded PDF.
+- `chat:write`
+- `files:write`
+- `files:read`
 
-After changing scopes, reinstall the Slack app to the workspace so the `xoxb-...` token receives them.
+## Cloudflare configuration
 
-## One-time setup
+The deployable Worker project is in `cloudflare-worker/`.
 
-### 1. Firebase
+- Worker name: `fo-monthly-bulletin-slack`
+- D1 database: `fo-monthly-bulletin-data`
+- D1 binding: `DB`
+- Secret: `SLACK_BOT_TOKEN`
+- Secret: `TURNSTILE_SECRET`
+- Variable: `SLACK_CHANNEL_ID=C0AFA7FR5EZ`
+- Variable: `ALLOWED_ORIGIN=https://ou7sa1der.github.io`
+- Turnstile site key in the frontend: `0x4AAAAAAEkp-UpXZa3HM01Q`
 
-The existing Firebase project is `fo-bulletin`.
+See `cloudflare-worker/README.md` for deploy instructions. Never commit a real `xoxb-...` token or Turnstile secret.
 
-1. Keep Firestore and Anonymous Authentication enabled.
-2. In Firebase Console, open **Firestore Database → Rules**.
-3. Replace the published rules with [`firestore.rules`](./firestore.rules) and click **Publish**.
-4. Keep the existing Firebase service-account private key in the GitHub Actions secret.
+## GitHub Actions
 
-The values in `firebase-config.js` are public web identifiers. Firestore Security Rules control browser access. Never commit the Firebase service-account JSON.
-
-### 2. GitHub Actions Secrets
-
-In **Settings → Secrets and variables → Actions**, keep these repository secrets:
-
-- `SLACK_BOT_TOKEN` — the complete `xoxb-...` token for the bot with all three scopes above.
-- `FIREBASE_SERVICE_ACCOUNT_JSON` — the complete Firebase service-account JSON.
-
-### 3. Publish and test
-
-Upload the changed files to the default branch, preserving their directories. GitHub Pages continues using the existing branch configuration.
-
-To process a request immediately, use **Actions → Process Slack queue → Run workflow**. The scheduled GitHub trigger can occasionally be delayed, so it should not be treated as an exact five-minute timer.
+The old Firestore queue processor is retained only as a manual legacy fallback. Its scheduled trigger is disabled and the current frontend no longer creates Slack queue documents.
 
 ## Using the site
 
@@ -71,15 +59,14 @@ To process a request immediately, use **Actions → Process Slack queue → Run 
 On the Bulletin tab:
 
 - `Generate PDF` downloads the monthly PDF locally.
-- `Send to Slack` confirms, generates the PDF, and queues it for direct Slack upload.
-- `Delete last Slack post` confirms and queues deletion of the latest bot delivery for that month.
+- `Send to Slack` sends the PDF directly through the Cloudflare Worker.
+- `Delete last Slack post` deletes the latest Worker delivery for that month.
 - `Clear Fields` keeps its existing behavior.
 
 ## Main files
 
-- `index.html`, `style.css`, `app.js` — UI, Firebase data flow, PDF generation, and queue controls.
+- `index.html`, `style.css`, `app.js` — UI, Firebase data flow, PDF generation, Turnstile, and direct Worker requests.
 - `firebase-config.js` — public Firebase web configuration.
-- `firestore.rules` — validation for bulletin data and immutable queue requests.
-- `.github/workflows/process-slack-queue.yml` — scheduled and manual processor.
-- `actions/process-slack-queue.mjs` — server-side Firestore and direct Slack PDF upload.
-- `actions/process-slack-queue.test.mjs` — processor validation tests.
+- `firestore.rules` — security rules for the existing bulletin data.
+- `cloudflare-worker/` — Worker, D1 schema, tests, and deploy scripts.
+- `.github/workflows/process-slack-queue.yml` — manual-only legacy fallback.
