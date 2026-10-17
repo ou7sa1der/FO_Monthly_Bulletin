@@ -255,10 +255,7 @@ async function loadSlackMessage() {
 document.getElementById("save-slack-message").addEventListener("click", async () => {
   await authReady;
   const text = slackMessageInput.value.trim();
-  if (!text) {
-    slackMessageStatusEl.textContent = "Write a message before saving.";
-    return;
-  }
+  
   if (text.length > MAX_SLACK_MESSAGE_CHARS) {
     slackMessageStatusEl.textContent = `Keep the message under ${MAX_SLACK_MESSAGE_CHARS} characters.`;
     return;
