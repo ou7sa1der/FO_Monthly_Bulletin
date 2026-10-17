@@ -17,7 +17,7 @@ The Slack bot token is never present in GitHub, Firebase, HTML, JavaScript, or t
 - Worker: `https://fo-monthly-bulletin-slack.kasparian6.workers.dev`
 - Test channel: `C0AFA7FR5EZ`
 - `Send to Slack` asks for confirmation, creates the same PDF as `Generate PDF`, completes Turnstile verification, and uploads it immediately.
-- The Slack post contains the fixed Fixtures Operations announcement followed by the PDF attachment and Slack preview.
+- The Slack announcement is written in `Submit your update`, saved in Firestore, and posted above the PDF attachment and Slack preview.
 - Up to three successful sends are allowed per bulletin month. Failed attempts do not count.
 - `Delete last Slack post` immediately removes the latest undeleted bot message and PDF for the selected month.
 - Deleting does not reduce the successful-send counter.
@@ -46,15 +46,17 @@ The deployable Worker project is in `cloudflare-worker/`.
 
 See `cloudflare-worker/README.md` for deploy instructions. Never commit a real `xoxb-...` token or Turnstile secret.
 
-## GitHub Actions
-
-The old Firestore queue processor is retained only as a manual legacy fallback. Its scheduled trigger is disabled and the current frontend no longer creates Slack queue documents.
-
 ## Using the site
 
 - Normal URL — full submission and bulletin controls.
 - `?mode=view` — read-only bulletin display with Slack/admin controls hidden.
 - `?mode=submit` — submission form only.
+
+On the Submit tab:
+
+- `Slack message` accepts free-form text and Unicode emoji.
+- `Save Slack message` persists the announcement in `bulletin/current/settings/slackMessage`.
+- `Clear Fields` also clears the saved Slack announcement for the next cycle.
 
 On the Bulletin tab:
 

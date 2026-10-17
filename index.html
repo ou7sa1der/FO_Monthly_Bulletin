@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Fixture Ops Monthly Bulletin</title>
-<link rel="stylesheet" href="style.css?v=20260902-1" />
+<link rel="stylesheet" href="style.css?v=20261017-1" />
 </head>
 <body>
 
@@ -73,6 +73,23 @@
       </div>
       <h3>Currently published shoutouts</h3>
       <div id="existing-shoutouts" class="existing-list"></div>
+    </div>
+
+    <div class="slack-message-form">
+      <h2>💬 Slack message</h2>
+      <p class="hint">Write the message that will appear above the bulletin PDF in Slack.</p>
+      <div class="slack-message-row" id="slack-message-row">
+        <textarea
+          id="slack-message-input"
+          rows="6"
+          maxlength="3000"
+          placeholder="Write the Slack announcement here..."
+        ></textarea>
+      </div>
+      <div class="save-row">
+        <button type="button" class="save-btn" id="save-slack-message">Save Slack message</button>
+        <span class="save-status" id="slack-message-status" aria-live="polite"></span>
+      </div>
     </div>
 
     </div>
@@ -152,6 +169,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
-<script type="module" src="app.js?v=20260902-1"></script>
+<script type="module" src="app.js?v=20261017-1"></script>
 </body>
 </html>

@@ -13,6 +13,7 @@ const TEAM_DEFAULTS = {
   foTeam: { name: "Fixture Ops Delivery", label: "Wins" },
   foSpecialists: { name: "Fixture Ops Automation / Operational Updates", label: "Big Wins" }
 };
+const MAX_SLACK_MESSAGE_CHARS = 3000;
 
 const authReady = signInAnonymously(auth).catch((err) => {
   console.error("Anonymous sign-in failed:", err);
@@ -74,7 +75,8 @@ function attachEmojiPicker(row, targetEl) {
   wrap.appendChild(btn);
   wrap.appendChild(panel);
   const removeBtn = row.querySelector(".remove-btn");
-  row.insertBefore(wrap, removeBtn);
+  if (removeBtn) row.insertBefore(wrap, removeBtn);
+  else row.appendChild(wrap);
 }
 
 document.addEventListener("click", (e) => {
@@ -82,6 +84,11 @@ document.addEventListener("click", (e) => {
     if (!wrap.contains(e.target)) wrap.querySelector(".emoji-panel").classList.remove("open");
   });
 });
+
+const slackMessageInput = document.getElementById("slack-message-input");
+const slackMessageStatusEl = document.getElementById("slack-message-status");
+const slackMessageRef = doc(db, "bulletin", "current", "settings", "slackMessage");
+attachEmojiPicker(document.getElementById("slack-message-row"), slackMessageInput);
 
 // ---------- Dynamic list row builders ----------
 function addRow(container, type, values = {}) {
@@ -232,6 +239,42 @@ document.getElementById("save-shoutouts").addEventListener("click", async () => 
   setTimeout(() => (statusEl.textContent = ""), 4000);
   loadShoutouts();
 });
+
+// ---------- Slack announcement ----------
+async function loadSlackMessage() {
+  await authReady;
+  try {
+    const snap = await getDoc(slackMessageRef);
+    slackMessageInput.value = snap.exists() ? snap.data().text || "" : "";
+  } catch (err) {
+    console.error("Failed to load Slack message:", err);
+    slackMessageStatusEl.textContent = "Couldn't load the Slack message — check your connection and reload.";
+  }
+}
+
+document.getElementById("save-slack-message").addEventListener("click", async () => {
+  await authReady;
+  const text = slackMessageInput.value.trim();
+  if (!text) {
+    slackMessageStatusEl.textContent = "Write a message before saving.";
+    return;
+  }
+  if (text.length > MAX_SLACK_MESSAGE_CHARS) {
+    slackMessageStatusEl.textContent = `Keep the message under ${MAX_SLACK_MESSAGE_CHARS} characters.`;
+    return;
+  }
+
+  try {
+    await setDoc(slackMessageRef, { text, updatedAt: serverTimestamp() });
+    slackMessageStatusEl.textContent = "Slack message saved ✅";
+    setTimeout(() => (slackMessageStatusEl.textContent = ""), 4000);
+  } catch (err) {
+    console.error("Failed to save Slack message:", err);
+    slackMessageStatusEl.textContent = "Save failed — check your connection and try again.";
+  }
+});
+
+loadSlackMessage();
 
 // ---------- Bulletin preview / Generate / Clear ----------
 async function loadBulletinPreview() {
@@ -484,11 +527,23 @@ function setSlackControlsBusy(busy, action = "") {
 
 sendSlackBtn.addEventListener("click", async () => {
   const period = getBulletinPeriod();
+  const slackMessage = slackMessageInput.value.trim();
+  if (!slackMessage) {
+    slackStatusEl.textContent = "Write and save a Slack message in Submit your update first.";
+    return;
+  }
+  if (slackMessage.length > MAX_SLACK_MESSAGE_CHARS) {
+    slackStatusEl.textContent = `The Slack message must be under ${MAX_SLACK_MESSAGE_CHARS} characters.`;
+    return;
+  }
   if (!confirm(`Send the ${period.label} bulletin PDF to Slack?`)) return;
 
   setSlackControlsBusy(true, "send");
   sendSlackBtn.textContent = "Preparing PDF…";
   try {
+    slackStatusEl.textContent = "Saving Slack message…";
+    await authReady;
+    await setDoc(slackMessageRef, { text: slackMessage, updatedAt: serverTimestamp() });
     slackStatusEl.textContent = "Generating PDF…";
     const pdf = await createBulletinPdf();
     const pdfBlob = pdf.output("blob");
@@ -502,10 +557,12 @@ sendSlackBtn.addEventListener("click", async () => {
     url.searchParams.set("periodKey", period.key);
     url.searchParams.set("periodLabel", period.label);
     url.searchParams.set("filename", period.filename);
+    const formData = new FormData();
+    formData.append("message", slackMessage);
+    formData.append("pdf", pdfBlob, period.filename);
     const result = await callSlackWorker(url.toString(), turnstileToken, {
       method: "POST",
-      headers: { "Content-Type": "application/pdf" },
-      body: pdfBlob
+      body: formData
     });
     slackStatusEl.textContent = `Sent to Slack ✅ (${result.successfulSends}/3)`;
   } catch (err) {
@@ -559,6 +616,8 @@ document.getElementById("clear-btn").addEventListener("click", async () => {
   for (const docSnap of shoutSnap.docs) {
     await deleteDoc(doc(db, "bulletin", "current", "shoutouts", docSnap.id));
   }
+  await setDoc(slackMessageRef, { text: "", updatedAt: serverTimestamp() });
+  slackMessageInput.value = "";
   statusEl.textContent = "Cleared — ready for next month ✅";
   setTimeout(() => (statusEl.textContent = ""), 4000);
   loadBulletinPreview();

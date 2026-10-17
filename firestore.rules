@@ -51,6 +51,16 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    match /bulletin/current/settings/slackMessage {
+      allow read: if true;
+      allow create, update: if request.auth != null
+        && request.resource.data.keys().hasOnly(['text', 'updatedAt'])
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 3000
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
+    }
+
     // A signed-in anonymous visitor may only create an immutable, tightly
     // validated queue item. GitHub Actions uses a Firebase service account to
     // claim and update jobs, so the Slack token never reaches this website.

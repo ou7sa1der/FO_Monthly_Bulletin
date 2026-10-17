@@ -1,0 +1,15 @@
+{
+  "name": "fo-monthly-bulletin-cloudflare-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute fo-monthly-bulletin-data --remote --file=schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.33.1"
+  }
+}

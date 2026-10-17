@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fo-monthly-bulletin-slack",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-02",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true
+    }
+  },
+  "vars": {
+    "SLACK_CHANNEL_ID": "C0AFA7FR5EZ",
+    "ALLOWED_ORIGIN": "https://ou7sa1der.github.io"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fo-monthly-bulletin-data",
+      "database_id": "05ef6235-6653-41fb-b6eb-35842c17a371"
+    }
+  ]
+}
